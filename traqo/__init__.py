@@ -1,4 +1,4 @@
-"""traqo — Structured tracing for LLM applications."""
+"""traqo — Structured tracing for applications."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import os
 
 from traqo._version import __version__
 from traqo.decorator import trace
-from traqo.tracer import Tracer, get_tracer
+from traqo.tracer import Span, Tracer, get_tracer
 
 _disabled: bool = os.environ.get("TRAQO_DISABLED", "").strip() in ("1", "true", "yes")
 
@@ -24,6 +24,7 @@ def enable() -> None:
 
 
 __all__ = [
+    "Span",
     "Tracer",
     "trace",
     "get_tracer",

@@ -1,6 +1,6 @@
 # traqo
 
-Structured tracing for LLM applications. JSONL files, hierarchical spans, zero infrastructure.
+Structured tracing for applications. JSONL files, hierarchical spans, zero infrastructure.
 
 ```python
 from traqo import Tracer, trace
@@ -22,6 +22,7 @@ Your traces are just `.jsonl` files. Read them with `grep`, query them with Duck
 - **Zero infrastructure** -- no server, no database, no account. `pip install traqo` and go.
 - **AI-first** -- JSONL is text. AI assistants read your traces directly, no browser needed.
 - **Hierarchical spans** -- not flat logs. Reconstruct the full call tree across functions and files.
+- **Everything is a span** -- LLM calls, DB queries, HTTP requests. All spans with metadata.
 - **Zero dependencies** -- stdlib only. Integrations are optional extras.
 - **Transparent** -- traces are portable files. No vendor lock-in, no proprietary format.
 
@@ -67,7 +68,7 @@ response = client.chat.completions.create(
     model="gpt-4o",
     messages=[{"role": "user", "content": "Summarize this..."}],
 )
-# Token usage, duration, input/output all captured automatically
+# Token usage, model, input/output all captured automatically as span metadata
 ```
 
 Works the same way for Anthropic and LangChain:
@@ -77,20 +78,35 @@ from traqo.integrations.anthropic import traced_anthropic
 from traqo.integrations.langchain import traced_model
 ```
 
-### 3. Read your traces
+### 3. Use metadata and kind for rich spans
+
+```python
+with Tracer(Path("traces/run.jsonl")) as tracer:
+    with tracer.span(
+        "classify",
+        input={"text": "Is this a bug?"},
+        metadata={"model": "gpt-4o", "provider": "openai"},
+        kind="llm",
+    ) as span:
+        result = call_llm(...)
+        span.set_metadata("token_usage", {"input_tokens": 100, "output_tokens": 50})
+        span.set_output(result)
+```
+
+### 4. Read your traces
 
 ```bash
 # Last line is always trace_end with summary stats
 tail -1 traces/my_run.jsonl | jq .
 
-# All LLM calls
-grep '"type":"llm_call"' traces/my_run.jsonl | jq .
+# All LLM spans
+grep '"kind":"llm"' traces/my_run.jsonl | jq .
 
 # Errors
 grep '"status":"error"' traces/**/*.jsonl
 
-# Token costs
-grep '"type":"llm_call"' traces/**/*.jsonl | jq '.token_usage'
+# Token usage from span metadata
+grep '"token_usage"' traces/**/*.jsonl | jq '.metadata.token_usage'
 ```
 
 ## API Reference
@@ -103,7 +119,7 @@ Creates a trace session writing to a JSONL file. Use as a context manager.
 with Tracer(
     Path("traces/run.jsonl"),
     metadata={"run_id": "abc123", "model": "gpt-4o"},
-    capture_content=False,  # Omit LLM input/output (keep tokens, duration)
+    capture_content=False,  # Integrations omit LLM input/output
 ):
     await my_pipeline()
 ```
@@ -112,18 +128,35 @@ with Tracer(
 |---|---|---|---|
 | `path` | `Path` | required | JSONL file path. Parent dirs created automatically. |
 | `metadata` | `dict` | `{}` | Arbitrary metadata written to `trace_start`. |
-| `capture_content` | `bool` | `True` | If `False`, LLM inputs/outputs omitted. |
+| `capture_content` | `bool` | `True` | If `False`, integrations omit LLM inputs/outputs. |
 
 **Methods:**
 
 | Method | Description |
 |---|---|
+| `span(name, *, input=, metadata=, kind=)` | Span context manager. Yields a `Span` object. |
 | `log(name, data)` | Write a custom event |
-| `llm_event(model=, input_messages=, output_text=, token_usage=, duration_s=, operation=)` | Write an `llm_call` event |
-| `span(name, inputs)` | Manual span context manager |
 | `child(name, path)` | Create a child tracer writing to a separate file |
 
-### `@trace(name=None, *, capture_input=True, capture_output=True)`
+### `Span`
+
+Mutable handle yielded by `tracer.span()`. Set output and metadata during execution.
+
+```python
+with tracer.span("my_step", input=data, kind="tool") as span:
+    result = do_work()
+    span.set_output(result)
+    span.set_metadata("latency_ms", 42)
+    span.update_metadata({"extra": "info"})
+```
+
+| Method | Description |
+|---|---|
+| `set_output(value)` | Set span output (written to `span_end`) |
+| `set_metadata(key, value)` | Set a metadata key |
+| `update_metadata(dict)` | Merge a dict into metadata |
+
+### `@trace(name=None, *, capture_input=True, capture_output=True, metadata=None, kind=None)`
 
 Decorator that wraps a function in a span. Works with sync and async functions.
 
@@ -132,9 +165,13 @@ Decorator that wraps a function in a span. Works with sync and async functions.
 async def my_step(data: list) -> dict:
     return process(data)
 
-@trace("custom_name", capture_input=False)
+@trace("custom_name", capture_input=False, kind="tool")
 def sensitive_step(secret: str) -> str:
     return handle(secret)
+
+@trace(metadata={"component": "auth"}, kind="tool")
+def login(user: str) -> bool:
+    return authenticate(user)
 ```
 
 When no tracer is active, `@trace` is a pure passthrough with zero overhead.
@@ -176,39 +213,33 @@ The parent trace records `child_started` / `child_ended` events and includes chi
 
 ## JSONL Format
 
-Every line is a self-contained JSON object. Six event types:
+Every line is a self-contained JSON object. Five event types:
 
 | Type | When | Key Fields |
 |---|---|---|
 | `trace_start` | Tracer enters | `tracer_version`, `metadata` |
-| `span_start` | Function/span begins | `id`, `parent_id`, `name`, `input` |
-| `span_end` | Function/span ends | `id`, `duration_s`, `status`, `output`, `error` |
-| `llm_call` | LLM invocation | `model`, `input`, `output`, `token_usage`, `duration_s` |
+| `span_start` | Span begins | `id`, `parent_id`, `name`, `input`, `metadata`, `kind` |
+| `span_end` | Span ends | `id`, `duration_s`, `status`, `output`, `metadata`, `kind` |
 | `event` | Custom checkpoint | `name`, `data` |
 | `trace_end` | Tracer exits | `duration_s`, `stats`, `children` |
+
+The `kind` field categorizes spans (e.g. `"llm"`, `"tool"`, `"retriever"`). Omitted when not set.
+
+The `metadata` dict is the universal extension point. LLM-specific data like `model`, `provider`, and `token_usage` are stored there.
 
 ## Query with DuckDB
 
 ```sql
-SELECT model, count(*) as calls,
-       sum(token_usage.input_tokens) as total_in,
-       sum(token_usage.output_tokens) as total_out,
+-- All LLM spans with token usage
+SELECT metadata->>'model' as model,
+       count(*) as calls,
+       sum((metadata->'token_usage'->>'input_tokens')::int) as total_in,
+       sum((metadata->'token_usage'->>'output_tokens')::int) as total_out,
        avg(duration_s) as avg_duration
 FROM read_json('traces/**/*.jsonl')
-WHERE type = 'llm_call'
+WHERE kind = 'llm'
 GROUP BY model;
 ```
-
-## vs Alternatives
-
-| Dimension | traqo | Opik (self-hosted) | Langfuse (self-hosted) |
-|---|---|---|---|
-| Infrastructure | None (filesystem) | Docker + ClickHouse + MySQL | Docker + Postgres |
-| Setup | `pip install traqo` | Docker compose + config | Docker compose + config |
-| Monthly cost | $0 | $50-200 | $50-200 |
-| Data format | JSONL (portable) | ClickHouse tables | Postgres tables |
-| Query method | grep / DuckDB / AI | SQL + UI | SQL + UI |
-| Dependencies | Zero | Many | Many |
 
 ## License
 

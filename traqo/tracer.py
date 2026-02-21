@@ -1,4 +1,4 @@
-"""Core Tracer class — the trace session."""
+"""Core Tracer and Span classes."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from traqo._version import __version__
-from traqo.serialize import serialize_error, serialize_output, to_json
+from traqo.serialize import serialize_error, to_json
 
 logger = logging.getLogger(__name__)
 
@@ -30,19 +30,16 @@ def get_tracer() -> Tracer | None:
 
 
 def _get_parent_id() -> str | None:
-    """Return the current parent span ID from the stack, or None for root."""
     stack = _span_stack.get([])
     return stack[-1] if stack else None
 
 
 def _push_span(span_id: str) -> None:
-    """Push a span ID onto the current context's span stack."""
     stack = _span_stack.get([])
     _span_stack.set([*stack, span_id])
 
 
 def _pop_span() -> None:
-    """Pop the top span ID from the current context's span stack."""
     stack = _span_stack.get([])
     if stack:
         _span_stack.set(stack[:-1])
@@ -54,6 +51,31 @@ def _now() -> str:
 
 def _uuid() -> str:
     return uuid.uuid4().hex[:12]
+
+
+class Span:
+    """A live span handle yielded by tracer.span().
+
+    Set output and metadata during execution — they are written to span_end.
+    """
+
+    __slots__ = ("id", "name", "parent_id", "output", "metadata")
+
+    def __init__(self, span_id: str, name: str, parent_id: str | None) -> None:
+        self.id = span_id
+        self.name = name
+        self.parent_id = parent_id
+        self.output: Any = None
+        self.metadata: dict[str, Any] = {}
+
+    def set_output(self, output: Any) -> None:
+        self.output = output
+
+    def set_metadata(self, key: str, value: Any) -> None:
+        self.metadata[key] = value
+
+    def update_metadata(self, data: dict[str, Any]) -> None:
+        self.metadata.update(data)
 
 
 class Tracer:
@@ -82,7 +104,6 @@ class Tracer:
 
         # Stats
         self._stats_spans = 0
-        self._stats_llm_calls = 0
         self._stats_events = 0
         self._stats_errors = 0
         self._stats_input_tokens = 0
@@ -111,6 +132,13 @@ class Tracer:
         except Exception:
             logger.warning("traqo: failed to write event", exc_info=True)
 
+    def _accumulate_tokens(self, span_obj: Span) -> None:
+        """If span metadata contains token_usage, accumulate into tracer stats."""
+        token_usage = span_obj.metadata.get("token_usage")
+        if token_usage and isinstance(token_usage, dict):
+            self._stats_input_tokens += token_usage.get("input_tokens", 0)
+            self._stats_output_tokens += token_usage.get("output_tokens", 0)
+
     def __enter__(self) -> Tracer:
         self._open()
         self._start_time = datetime.now(timezone.utc)
@@ -138,7 +166,6 @@ class Tracer:
                 "duration_s": round(duration, 3),
                 "stats": {
                     "spans": self._stats_spans,
-                    "llm_calls": self._stats_llm_calls,
                     "events": self._stats_events,
                     "total_input_tokens": self._stats_input_tokens,
                     "total_output_tokens": self._stats_output_tokens,
@@ -173,101 +200,95 @@ class Tracer:
             }
         )
 
-    def llm_event(
-        self,
-        *,
-        model: str,
-        input_messages: list[dict[str, Any]] | None = None,
-        output_text: str | None = None,
-        token_usage: dict[str, int] | None = None,
-        duration_s: float | None = None,
-        operation: str | None = None,
-    ) -> None:
-        """Write an llm_call event."""
-        self._stats_llm_calls += 1
-        if token_usage:
-            self._stats_input_tokens += token_usage.get("input_tokens", 0)
-            self._stats_output_tokens += token_usage.get("output_tokens", 0)
-
-        event: dict[str, Any] = {
-            "type": "llm_call",
-            "id": _uuid(),
-            "parent_id": _get_parent_id(),
-            "ts": _now(),
-            "model": model,
-        }
-        if self._capture_content:
-            if input_messages is not None:
-                event["input"] = input_messages
-            if output_text is not None:
-                event["output"] = output_text
-        if duration_s is not None:
-            event["duration_s"] = round(duration_s, 3)
-        if token_usage:
-            event["token_usage"] = token_usage
-        if operation:
-            event["operation"] = operation
-        self._write(event)
-
     @contextmanager
-    def span(self, name: str, inputs: dict[str, Any] | None = None):
-        """Manual span context manager."""
+    def span(
+        self,
+        name: str,
+        *,
+        input: Any = None,
+        metadata: dict[str, Any] | None = None,
+        kind: str | None = None,
+    ):
+        """Span context manager. Yields a Span handle for setting output/metadata.
+
+        Args:
+            name: Span name.
+            input: Input data written to span_start.
+            metadata: Initial metadata. Can be updated via the yielded Span object.
+            kind: Optional span categorization (e.g. "llm", "tool", "retriever").
+        """
         span_id = _uuid()
         parent_id = _get_parent_id()
         start = datetime.now(timezone.utc)
 
-        self._write(
-            {
-                "type": "span_start",
-                "id": span_id,
-                "parent_id": parent_id,
-                "name": name,
-                "ts": start.isoformat(),
-                **({"input": inputs} if inputs else {}),
-            }
-        )
+        span_obj = Span(span_id, name, parent_id)
+        if metadata:
+            span_obj.metadata.update(metadata)
+
+        start_event: dict[str, Any] = {
+            "type": "span_start",
+            "id": span_id,
+            "parent_id": parent_id,
+            "name": name,
+            "ts": start.isoformat(),
+        }
+        if kind is not None:
+            start_event["kind"] = kind
+        if input is not None:
+            start_event["input"] = input
+        if span_obj.metadata:
+            start_event["metadata"] = span_obj.metadata.copy()
+        self._write(start_event)
+
         _push_span(span_id)
         try:
-            yield span_id
+            yield span_obj
         except BaseException as exc:
             duration = (datetime.now(timezone.utc) - start).total_seconds()
             self._stats_spans += 1
             self._stats_errors += 1
-            self._write(
-                {
-                    "type": "span_end",
-                    "id": span_id,
-                    "parent_id": parent_id,
-                    "name": name,
-                    "ts": _now(),
-                    "duration_s": round(duration, 3),
-                    "status": "error",
-                    "error": serialize_error(exc),
-                }
-            )
-            raise
-        finally:
-            _pop_span()
-
-        duration = (datetime.now(timezone.utc) - start).total_seconds()
-        self._stats_spans += 1
-        self._write(
-            {
+            self._accumulate_tokens(span_obj)
+            end_event: dict[str, Any] = {
                 "type": "span_end",
                 "id": span_id,
                 "parent_id": parent_id,
                 "name": name,
                 "ts": _now(),
                 "duration_s": round(duration, 3),
-                "status": "ok",
+                "status": "error",
+                "error": serialize_error(exc),
             }
-        )
+            if kind is not None:
+                end_event["kind"] = kind
+            if span_obj.metadata:
+                end_event["metadata"] = span_obj.metadata
+            self._write(end_event)
+            raise
+        finally:
+            _pop_span()
+
+        duration = (datetime.now(timezone.utc) - start).total_seconds()
+        self._stats_spans += 1
+        self._accumulate_tokens(span_obj)
+        end_event: dict[str, Any] = {
+            "type": "span_end",
+            "id": span_id,
+            "parent_id": parent_id,
+            "name": name,
+            "ts": _now(),
+            "duration_s": round(duration, 3),
+            "status": "ok",
+        }
+        if kind is not None:
+            end_event["kind"] = kind
+        if span_obj.output is not None:
+            end_event["output"] = span_obj.output
+        if span_obj.metadata:
+            end_event["metadata"] = span_obj.metadata
+        self._write(end_event)
 
     def child(self, name: str, path: Path | None = None) -> Tracer:
-        """Create a child tracer writing to a separate file.
-
-        The child is linked to this parent via events and the trace_start header.
-        """
+        """Create a child tracer writing to a separate file."""
         if path is None:
             path = self._path.parent / f"{name}.jsonl"
 
@@ -276,14 +297,11 @@ class Tracer:
             metadata={"parent_trace": str(self._path)},
             capture_content=self._capture_content,
         )
-        # Store reference so we can write events to parent
         child_tracer._parent = self
         child_tracer._child_name = name
-
         return child_tracer
 
     def _write_child_started(self, name: str, path: Path) -> None:
-        """Write child_started event to this (parent) tracer."""
         self._write(
             {
                 "type": "event",
@@ -297,7 +315,6 @@ class Tracer:
         self._stats_events += 1
 
     def _write_child_ended(self, name: str, child: Tracer) -> None:
-        """Write child_ended event to this (parent) tracer and record summary."""
         summary = {
             "name": name,
             "path": str(child._path),
@@ -306,7 +323,9 @@ class Tracer:
             )
             if child._start_time
             else 0.0,
-            "llm_calls": child._stats_llm_calls,
+            "spans": child._stats_spans,
+            "total_input_tokens": child._stats_input_tokens,
+            "total_output_tokens": child._stats_output_tokens,
         }
         self._children.append(summary)
         self._write(
@@ -319,14 +338,16 @@ class Tracer:
                 "data": {
                     "child_name": name,
                     "duration_s": summary["duration_s"],
-                    "llm_calls": summary["llm_calls"],
+                    "spans": summary["spans"],
+                    "total_input_tokens": summary["total_input_tokens"],
+                    "total_output_tokens": summary["total_output_tokens"],
                 },
             }
         )
         self._stats_events += 1
 
 
-# Override __enter__/__exit__ for child tracers to write parent events
+# Child tracer enter/exit hooks
 _original_enter = Tracer.__enter__
 _original_exit = Tracer.__exit__
 
@@ -346,7 +367,6 @@ def _child_exit(self: Tracer, exc_type, exc_val, exc_tb):
     return _original_exit(self, exc_type, exc_val, exc_tb)
 
 
-# Patch enter/exit to handle child notifications
 Tracer.__enter__ = _child_enter
 Tracer.__exit__ = _child_exit
 

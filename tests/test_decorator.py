@@ -81,6 +81,35 @@ class TestSyncDecorator:
         end = [e for e in events if e["type"] == "span_end"][0]
         assert "output" not in end
 
+    def test_metadata_parameter(self, trace_file: Path):
+        @trace(metadata={"component": "auth", "version": 2})
+        def login(user: str) -> bool:
+            return True
+
+        with Tracer(trace_file):
+            login("alice")
+
+        events = read_events(trace_file)
+        start = [e for e in events if e["type"] == "span_start"][0]
+        end = [e for e in events if e["type"] == "span_end"][0]
+        assert start["metadata"]["component"] == "auth"
+        assert start["metadata"]["version"] == 2
+        assert end["metadata"]["component"] == "auth"
+
+    def test_kind_parameter(self, trace_file: Path):
+        @trace(kind="tool")
+        def search(query: str) -> str:
+            return "results"
+
+        with Tracer(trace_file):
+            search("hello")
+
+        events = read_events(trace_file)
+        start = [e for e in events if e["type"] == "span_start"][0]
+        end = [e for e in events if e["type"] == "span_end"][0]
+        assert start["kind"] == "tool"
+        assert end["kind"] == "tool"
+
 
 class TestAsyncDecorator:
     async def test_async_function(self, trace_file: Path):
@@ -112,6 +141,19 @@ class TestAsyncDecorator:
         events = read_events(trace_file)
         end = [e for e in events if e["type"] == "span_end"][0]
         assert end["status"] == "error"
+
+    async def test_async_metadata_and_kind(self, trace_file: Path):
+        @trace(metadata={"provider": "openai"}, kind="llm")
+        async def chat(prompt: str) -> str:
+            return "response"
+
+        async with Tracer(trace_file):
+            await chat("hello")
+
+        events = read_events(trace_file)
+        start = [e for e in events if e["type"] == "span_start"][0]
+        assert start["kind"] == "llm"
+        assert start["metadata"]["provider"] == "openai"
 
 
 class TestNesting:

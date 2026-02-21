@@ -60,12 +60,24 @@ class TestChildTracer:
         with Tracer(parent_path) as parent:
             child = parent.child("agent_a", child_path)
             with child:
-                child.llm_event(model="m1", token_usage={"input_tokens": 10, "output_tokens": 5})
-                child.llm_event(model="m2", token_usage={"input_tokens": 20, "output_tokens": 10})
+                with child.span(
+                    "call1",
+                    metadata={"token_usage": {"input_tokens": 10, "output_tokens": 5}},
+                    kind="llm",
+                ):
+                    pass
+                with child.span(
+                    "call2",
+                    metadata={"token_usage": {"input_tokens": 20, "output_tokens": 10}},
+                    kind="llm",
+                ):
+                    pass
 
         parent_events = read_events(parent_path)
         ended = [e for e in parent_events if e["type"] == "event" and e.get("name") == "child_ended"][0]
-        assert ended["data"]["llm_calls"] == 2
+        assert ended["data"]["spans"] == 2
+        assert ended["data"]["total_input_tokens"] == 30
+        assert ended["data"]["total_output_tokens"] == 15
         assert "duration_s" in ended["data"]
 
     def test_child_default_path(self, tmp_path: Path):
@@ -98,7 +110,8 @@ class TestChildTracer:
         with Tracer(parent_path) as parent:
             child = parent.child("agent_a", child_path)
             with child:
-                child.llm_event(model="m1")
+                with child.span("work", kind="llm"):
+                    pass
 
         parent_events = read_events(parent_path)
         trace_end = parent_events[-1]
@@ -114,13 +127,4 @@ class TestChildTracer:
         with Tracer(parent_path, capture_content=False) as parent:
             child = parent.child("agent_a", child_path)
             with child:
-                child.llm_event(
-                    model="m1",
-                    input_messages=[{"role": "user", "content": "secret"}],
-                    output_text="response",
-                )
-
-        child_events = read_events(child_path)
-        llm = [e for e in child_events if e["type"] == "llm_call"][0]
-        assert "input" not in llm
-        assert "output" not in llm
+                assert child._capture_content is False

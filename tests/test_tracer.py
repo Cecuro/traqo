@@ -32,29 +32,35 @@ class TestTraceStartEnd:
         with Tracer(trace_file) as tracer:
             tracer.log("evt1", {"a": 1})
             tracer.log("evt2", {"b": 2})
-            tracer.llm_event(
-                model="test-model",
-                input_messages=[{"role": "user", "content": "hi"}],
-                output_text="hello",
-                token_usage={"input_tokens": 10, "output_tokens": 5},
-            )
+            with tracer.span(
+                "llm_call",
+                input=[{"role": "user", "content": "hi"}],
+                metadata={"model": "test-model", "token_usage": {"input_tokens": 10, "output_tokens": 5}},
+                kind="llm",
+            ) as span:
+                span.set_output("hello")
         events = read_events(trace_file)
         stats = events[-1]["stats"]
         assert stats["events"] == 2
-        assert stats["llm_calls"] == 1
-        assert stats["spans"] == 0
+        assert stats["spans"] == 1
         assert stats["errors"] == 0
+        assert stats["total_input_tokens"] == 10
+        assert stats["total_output_tokens"] == 5
 
     def test_trace_end_token_accumulation(self, trace_file: Path):
         with Tracer(trace_file) as tracer:
-            tracer.llm_event(
-                model="m1",
-                token_usage={"input_tokens": 100, "output_tokens": 50},
-            )
-            tracer.llm_event(
-                model="m2",
-                token_usage={"input_tokens": 200, "output_tokens": 100},
-            )
+            with tracer.span(
+                "call1",
+                metadata={"token_usage": {"input_tokens": 100, "output_tokens": 50}},
+                kind="llm",
+            ):
+                pass
+            with tracer.span(
+                "call2",
+                metadata={"token_usage": {"input_tokens": 200, "output_tokens": 100}},
+                kind="llm",
+            ):
+                pass
         events = read_events(trace_file)
         stats = events[-1]["stats"]
         assert stats["total_input_tokens"] == 300
@@ -95,40 +101,76 @@ class TestLogEvent:
         assert "data" not in evt
 
 
-class TestLLMEvent:
-    def test_llm_event(self, trace_file: Path):
-        with Tracer(trace_file) as tracer:
-            tracer.llm_event(
-                model="gpt-5-mini",
-                input_messages=[{"role": "user", "content": "hello"}],
-                output_text="hi there",
-                token_usage={"input_tokens": 10, "output_tokens": 5},
-                duration_s=1.5,
-                operation="greet",
-            )
-        events = read_events(trace_file)
-        llm = [e for e in events if e["type"] == "llm_call"][0]
-        assert llm["model"] == "gpt-5-mini"
-        assert llm["input"] == [{"role": "user", "content": "hello"}]
-        assert llm["output"] == "hi there"
-        assert llm["token_usage"] == {"input_tokens": 10, "output_tokens": 5}
-        assert llm["duration_s"] == 1.5
-        assert llm["operation"] == "greet"
+class TestSpanMetadata:
+    """Test span metadata — replaces the old TestLLMEvent class."""
 
-    def test_llm_event_within_span(self, trace_file: Path):
+    def test_span_with_llm_metadata(self, trace_file: Path):
         with Tracer(trace_file) as tracer:
-            with tracer.span("outer"):
-                tracer.llm_event(model="m1")
+            with tracer.span(
+                "chat",
+                input=[{"role": "user", "content": "hello"}],
+                metadata={
+                    "model": "gpt-5-mini",
+                    "provider": "openai",
+                    "token_usage": {"input_tokens": 10, "output_tokens": 5},
+                },
+                kind="llm",
+            ) as span:
+                span.set_output("hi there")
         events = read_events(trace_file)
-        llm = [e for e in events if e["type"] == "llm_call"][0]
-        span_start = [e for e in events if e["type"] == "span_start"][0]
-        assert llm["parent_id"] == span_start["id"]
+        start = [e for e in events if e["type"] == "span_start"][0]
+        end = [e for e in events if e["type"] == "span_end"][0]
+        assert start["kind"] == "llm"
+        assert start["input"] == [{"role": "user", "content": "hello"}]
+        assert start["metadata"]["model"] == "gpt-5-mini"
+        assert end["output"] == "hi there"
+        assert end["metadata"]["token_usage"] == {"input_tokens": 10, "output_tokens": 5}
+
+    def test_span_metadata_set_during_execution(self, trace_file: Path):
+        with Tracer(trace_file) as tracer:
+            with tracer.span("step") as span:
+                span.set_metadata("model", "claude-4")
+                span.set_metadata("token_usage", {"input_tokens": 50, "output_tokens": 25})
+        events = read_events(trace_file)
+        end = [e for e in events if e["type"] == "span_end"][0]
+        assert end["metadata"]["model"] == "claude-4"
+        assert end["metadata"]["token_usage"]["input_tokens"] == 50
+
+    def test_span_within_span(self, trace_file: Path):
+        with Tracer(trace_file) as tracer:
+            with tracer.span("outer") as outer:
+                with tracer.span("inner", kind="llm") as inner:
+                    pass
+        events = read_events(trace_file)
+        inner_start = [e for e in events if e["type"] == "span_start" and e["name"] == "inner"][0]
+        outer_start = [e for e in events if e["type"] == "span_start" and e["name"] == "outer"][0]
+        assert inner_start["parent_id"] == outer_start["id"]
+
+    def test_kind_field_written(self, trace_file: Path):
+        with Tracer(trace_file) as tracer:
+            with tracer.span("retrieval", kind="retriever"):
+                pass
+        events = read_events(trace_file)
+        start = [e for e in events if e["type"] == "span_start"][0]
+        end = [e for e in events if e["type"] == "span_end"][0]
+        assert start["kind"] == "retriever"
+        assert end["kind"] == "retriever"
+
+    def test_kind_omitted_when_none(self, trace_file: Path):
+        with Tracer(trace_file) as tracer:
+            with tracer.span("plain_step"):
+                pass
+        events = read_events(trace_file)
+        start = [e for e in events if e["type"] == "span_start"][0]
+        end = [e for e in events if e["type"] == "span_end"][0]
+        assert "kind" not in start
+        assert "kind" not in end
 
 
 class TestSpan:
     def test_span_start_end(self, trace_file: Path):
         with Tracer(trace_file) as tracer:
-            with tracer.span("my_step", {"key": "val"}):
+            with tracer.span("my_step", input={"key": "val"}):
                 pass
         events = read_events(trace_file)
         starts = [e for e in events if e["type"] == "span_start"]
@@ -153,12 +195,34 @@ class TestSpan:
 
     def test_nested_spans_parent_ids(self, trace_file: Path):
         with Tracer(trace_file) as tracer:
-            with tracer.span("outer") as outer_id:
-                with tracer.span("inner") as inner_id:
+            with tracer.span("outer") as outer:
+                with tracer.span("inner") as inner:
                     pass
         events = read_events(trace_file)
         inner_start = [e for e in events if e["type"] == "span_start" and e["name"] == "inner"][0]
-        assert inner_start["parent_id"] == outer_id
+        assert inner_start["parent_id"] == outer.id
+
+    def test_span_yields_span_object(self, trace_file: Path):
+        with Tracer(trace_file) as tracer:
+            with tracer.span("test") as span:
+                assert hasattr(span, "id")
+                assert hasattr(span, "name")
+                assert span.name == "test"
+                span.set_output("result")
+                span.set_metadata("key", "value")
+        events = read_events(trace_file)
+        end = [e for e in events if e["type"] == "span_end"][0]
+        assert end["output"] == "result"
+        assert end["metadata"]["key"] == "value"
+
+    def test_span_update_metadata(self, trace_file: Path):
+        with Tracer(trace_file) as tracer:
+            with tracer.span("test") as span:
+                span.update_metadata({"a": 1, "b": 2})
+                span.set_metadata("c", 3)
+        events = read_events(trace_file)
+        end = [e for e in events if e["type"] == "span_end"][0]
+        assert end["metadata"] == {"a": 1, "b": 2, "c": 3}
 
 
 class TestGetTracer:
@@ -176,36 +240,18 @@ class TestGetTracer:
 
 
 class TestCaptureContent:
-    def test_capture_content_true_includes_input_output(self, trace_file: Path):
+    def test_capture_content_flag_accessible(self, trace_file: Path):
         with Tracer(trace_file, capture_content=True) as tracer:
-            tracer.llm_event(
-                model="m1",
-                input_messages=[{"role": "user", "content": "secret"}],
-                output_text="response",
-            )
-        events = read_events(trace_file)
-        llm = [e for e in events if e["type"] == "llm_call"][0]
-        assert "input" in llm
-        assert "output" in llm
+            assert tracer._capture_content is True
 
-    def test_capture_content_false_omits_input_output(self, trace_file: Path):
+    def test_capture_content_false_flag(self, trace_file: Path):
         with Tracer(trace_file, capture_content=False) as tracer:
-            tracer.llm_event(
-                model="m1",
-                input_messages=[{"role": "user", "content": "secret"}],
-                output_text="response",
-                token_usage={"input_tokens": 10, "output_tokens": 5},
-            )
-        events = read_events(trace_file)
-        llm = [e for e in events if e["type"] == "llm_call"][0]
-        assert "input" not in llm
-        assert "output" not in llm
-        assert llm["model"] == "m1"
-        assert llm["token_usage"]["input_tokens"] == 10
+            assert tracer._capture_content is False
 
-    def test_capture_content_does_not_affect_spans(self, trace_file: Path):
+    def test_span_input_always_written(self, trace_file: Path):
+        """Span input is controlled by the caller, not capture_content."""
         with Tracer(trace_file, capture_content=False) as tracer:
-            with tracer.span("step", {"data": "visible"}):
+            with tracer.span("step", input={"data": "visible"}):
                 pass
         events = read_events(trace_file)
         start = [e for e in events if e["type"] == "span_start"][0]

@@ -1,8 +1,7 @@
-"""LangChain integration — wrap BaseChatModel to auto-trace LLM calls."""
+"""LangChain integration — wrap BaseChatModel to auto-trace LLM calls as spans."""
 
 from __future__ import annotations
 
-import time
 from typing import Any
 
 try:
@@ -18,17 +17,13 @@ from traqo.tracer import get_tracer
 
 
 def _extract_token_usage(result: ChatResult) -> dict[str, int]:
-    """Extract token usage from ChatResult, checking both llm_output and usage_metadata."""
     usage: dict[str, int] = {}
-
-    # Check llm_output (OpenAI-style)
     llm_output = result.llm_output or {}
     token_usage = llm_output.get("token_usage", {})
     if token_usage:
         usage["input_tokens"] = token_usage.get("prompt_tokens", 0)
         usage["output_tokens"] = token_usage.get("completion_tokens", 0)
 
-    # Check usage_metadata on the message (newer LangChain)
     if result.generations:
         gen = result.generations[0]
         if isinstance(gen, ChatGeneration) and isinstance(gen.message, AIMessage):
@@ -36,12 +31,10 @@ def _extract_token_usage(result: ChatResult) -> dict[str, int]:
             if meta:
                 usage["input_tokens"] = getattr(meta, "input_tokens", 0) or meta.get("input_tokens", 0) if isinstance(meta, dict) else getattr(meta, "input_tokens", 0)
                 usage["output_tokens"] = getattr(meta, "output_tokens", 0) or meta.get("output_tokens", 0) if isinstance(meta, dict) else getattr(meta, "output_tokens", 0)
-
     return usage
 
 
 def _extract_output_text(result: ChatResult) -> str:
-    """Extract the text content from a ChatResult."""
     if result.generations:
         gen = result.generations[0]
         if isinstance(gen, ChatGeneration) and gen.message:
@@ -51,16 +44,10 @@ def _extract_output_text(result: ChatResult) -> str:
 
 
 def _messages_to_dicts(messages: list[BaseMessage]) -> list[dict[str, Any]]:
-    """Convert LangChain messages to plain dicts for logging."""
-    result = []
-    for msg in messages:
-        d: dict[str, Any] = {"role": msg.type, "content": msg.content}
-        result.append(d)
-    return result
+    return [{"role": msg.type, "content": msg.content} for msg in messages]
 
 
 def _extract_model_name(model: BaseChatModel) -> str:
-    """Extract the model name string from a BaseChatModel."""
     if hasattr(model, "model_name"):
         return model.model_name
     if hasattr(model, "model"):
@@ -69,7 +56,7 @@ def _extract_model_name(model: BaseChatModel) -> str:
 
 
 class TracedChatModel(BaseChatModel):
-    """Wrapper around a BaseChatModel that logs llm_call events to the active tracer."""
+    """Wrapper around a BaseChatModel that logs LLM calls as traced spans."""
 
     wrapped: BaseChatModel
     operation: str = ""
@@ -92,21 +79,31 @@ class TracedChatModel(BaseChatModel):
         run_manager: Any = None,
         **kwargs: Any,
     ) -> ChatResult:
-        start = time.monotonic()
-        result = self.wrapped._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
-        duration = time.monotonic() - start
-
         tracer = get_tracer()
-        if tracer:
-            tracer.llm_event(
-                model=_extract_model_name(self.wrapped),
-                input_messages=_messages_to_dicts(messages),
-                output_text=_extract_output_text(result),
-                token_usage=_extract_token_usage(result),
-                duration_s=duration,
-                operation=self.operation or None,
-            )
-        return result
+        if tracer is None:
+            return self.wrapped._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+
+        span_meta: dict[str, Any] = {
+            "provider": "langchain",
+            "model": _extract_model_name(self.wrapped),
+        }
+        if self.operation:
+            span_meta["operation"] = self.operation
+        input_data = _messages_to_dicts(messages) if tracer._capture_content else None
+
+        with tracer.span(
+            self.operation or "langchain.chat.generate",
+            input=input_data,
+            metadata=span_meta,
+            kind="llm",
+        ) as span:
+            result = self.wrapped._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+            usage = _extract_token_usage(result)
+            if usage:
+                span.set_metadata("token_usage", usage)
+            if tracer._capture_content:
+                span.set_output(_extract_output_text(result))
+            return result
 
     async def _agenerate(
         self,
@@ -115,21 +112,31 @@ class TracedChatModel(BaseChatModel):
         run_manager: Any = None,
         **kwargs: Any,
     ) -> ChatResult:
-        start = time.monotonic()
-        result = await self.wrapped._agenerate(messages, stop=stop, run_manager=run_manager, **kwargs)
-        duration = time.monotonic() - start
-
         tracer = get_tracer()
-        if tracer:
-            tracer.llm_event(
-                model=_extract_model_name(self.wrapped),
-                input_messages=_messages_to_dicts(messages),
-                output_text=_extract_output_text(result),
-                token_usage=_extract_token_usage(result),
-                duration_s=duration,
-                operation=self.operation or None,
-            )
-        return result
+        if tracer is None:
+            return await self.wrapped._agenerate(messages, stop=stop, run_manager=run_manager, **kwargs)
+
+        span_meta: dict[str, Any] = {
+            "provider": "langchain",
+            "model": _extract_model_name(self.wrapped),
+        }
+        if self.operation:
+            span_meta["operation"] = self.operation
+        input_data = _messages_to_dicts(messages) if tracer._capture_content else None
+
+        with tracer.span(
+            self.operation or "langchain.chat.generate",
+            input=input_data,
+            metadata=span_meta,
+            kind="llm",
+        ) as span:
+            result = await self.wrapped._agenerate(messages, stop=stop, run_manager=run_manager, **kwargs)
+            usage = _extract_token_usage(result)
+            if usage:
+                span.set_metadata("token_usage", usage)
+            if tracer._capture_content:
+                span.set_output(_extract_output_text(result))
+            return result
 
     def __getattr__(self, name: str) -> Any:
         if name in ("wrapped", "operation"):
@@ -138,9 +145,5 @@ class TracedChatModel(BaseChatModel):
 
 
 def traced_model(model: BaseChatModel, operation: str = "") -> TracedChatModel:
-    """Wrap a LangChain chat model to auto-trace LLM calls.
-
-    Returns a TracedChatModel that behaves identically to the original,
-    except it logs llm_call events to the active traqo tracer.
-    """
+    """Wrap a LangChain chat model to auto-trace LLM calls as spans."""
     return TracedChatModel(wrapped=model, operation=operation)
