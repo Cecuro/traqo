@@ -17,6 +17,7 @@ def trace(
     capture_input: bool = True,
     capture_output: bool = True,
     metadata: dict[str, Any] | None = None,
+    tags: list[str] | None = None,
     kind: str | None = None,
 ) -> Callable:
     """Decorator that wraps a function in a tracing span.
@@ -55,7 +56,7 @@ def trace(
                     else None
                 )
                 with tracer.span(
-                    span_name, input=input_data, metadata=metadata, kind=kind
+                    span_name, input=input_data, metadata=metadata, tags=tags, kind=kind
                 ) as span:
                     result = await func(*args, **kwargs)
                     if capture_output:
@@ -83,7 +84,7 @@ def trace(
                     else None
                 )
                 with tracer.span(
-                    span_name, input=input_data, metadata=metadata, kind=kind
+                    span_name, input=input_data, metadata=metadata, tags=tags, kind=kind
                 ) as span:
                     result = func(*args, **kwargs)
                     if capture_output:

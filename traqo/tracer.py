@@ -17,7 +17,7 @@ from traqo.serialize import serialize_error, to_json
 logger = logging.getLogger(__name__)
 
 _active_tracer: ContextVar[Tracer | None] = ContextVar("_active_tracer", default=None)
-_span_stack: ContextVar[list[str]] = ContextVar("_span_stack", default=[])
+_span_stack: ContextVar[list[Span]] = ContextVar("_span_stack", default=[])
 
 
 def get_tracer() -> Tracer | None:
@@ -29,14 +29,20 @@ def get_tracer() -> Tracer | None:
     return _active_tracer.get(None)
 
 
-def _get_parent_id() -> str | None:
+def get_current_span() -> Span | None:
+    """Return the current active Span, or None if no span is active."""
     stack = _span_stack.get([])
     return stack[-1] if stack else None
 
 
-def _push_span(span_id: str) -> None:
+def _get_parent_id() -> str | None:
     stack = _span_stack.get([])
-    _span_stack.set([*stack, span_id])
+    return stack[-1].id if stack else None
+
+
+def _push_span(span_obj: Span) -> None:
+    stack = _span_stack.get([])
+    _span_stack.set([*stack, span_obj])
 
 
 def _pop_span() -> None:
@@ -59,7 +65,7 @@ class Span:
     Set output and metadata during execution — they are written to span_end.
     """
 
-    __slots__ = ("id", "name", "parent_id", "output", "metadata")
+    __slots__ = ("id", "name", "parent_id", "output", "metadata", "tags")
 
     def __init__(self, span_id: str, name: str, parent_id: str | None) -> None:
         self.id = span_id
@@ -67,6 +73,7 @@ class Span:
         self.parent_id = parent_id
         self.output: Any = None
         self.metadata: dict[str, Any] = {}
+        self.tags: list[str] = []
 
     def set_output(self, output: Any) -> None:
         self.output = output
@@ -88,19 +95,26 @@ class Tracer:
         self,
         path: Path,
         *,
+        input: Any = None,
         metadata: dict[str, Any] | None = None,
+        tags: list[str] | None = None,
+        thread_id: str | None = None,
         capture_content: bool = True,
     ) -> None:
         import traqo
 
         self._path = Path(path)
+        self._input = input
         self._metadata = metadata or {}
+        self._tags = tags or []
+        self._thread_id = thread_id
         self._capture_content = capture_content
         self._disabled = traqo._disabled
         self._lock = threading.Lock()
         self._file = None
         self._token = None
         self._start_time: datetime | None = None
+        self._output: Any = None
 
         # Stats
         self._stats_spans = 0
@@ -109,6 +123,10 @@ class Tracer:
         self._stats_input_tokens = 0
         self._stats_output_tokens = 0
         self._children: list[dict[str, Any]] = []
+
+    def set_output(self, output: Any) -> None:
+        """Set trace-level output. Written to trace_end."""
+        self._output = output
 
     def _open(self) -> None:
         if self._disabled:
@@ -143,14 +161,20 @@ class Tracer:
         self._open()
         self._start_time = datetime.now(timezone.utc)
         self._token = _active_tracer.set(self)
-        self._write(
-            {
-                "type": "trace_start",
-                "ts": self._start_time.isoformat(),
-                "tracer_version": __version__,
-                **({"metadata": self._metadata} if self._metadata else {}),
-            }
-        )
+        start_event: dict[str, Any] = {
+            "type": "trace_start",
+            "ts": self._start_time.isoformat(),
+            "tracer_version": __version__,
+        }
+        if self._input is not None:
+            start_event["input"] = self._input
+        if self._metadata:
+            start_event["metadata"] = self._metadata
+        if self._tags:
+            start_event["tags"] = self._tags
+        if self._thread_id is not None:
+            start_event["thread_id"] = self._thread_id
+        self._write(start_event)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
@@ -159,21 +183,23 @@ class Tracer:
             if self._start_time
             else 0.0
         )
-        self._write(
-            {
-                "type": "trace_end",
-                "ts": _now(),
-                "duration_s": round(duration, 3),
-                "stats": {
-                    "spans": self._stats_spans,
-                    "events": self._stats_events,
-                    "total_input_tokens": self._stats_input_tokens,
-                    "total_output_tokens": self._stats_output_tokens,
-                    "errors": self._stats_errors,
-                },
-                **({"children": self._children} if self._children else {}),
-            }
-        )
+        end_event: dict[str, Any] = {
+            "type": "trace_end",
+            "ts": _now(),
+            "duration_s": round(duration, 3),
+            "stats": {
+                "spans": self._stats_spans,
+                "events": self._stats_events,
+                "total_input_tokens": self._stats_input_tokens,
+                "total_output_tokens": self._stats_output_tokens,
+                "errors": self._stats_errors,
+            },
+        }
+        if self._output is not None:
+            end_event["output"] = self._output
+        if self._children:
+            end_event["children"] = self._children
+        self._write(end_event)
         self._close()
         if self._token is not None:
             _active_tracer.reset(self._token)
@@ -207,6 +233,7 @@ class Tracer:
         *,
         input: Any = None,
         metadata: dict[str, Any] | None = None,
+        tags: list[str] | None = None,
         kind: str | None = None,
     ):
         """Span context manager. Yields a Span handle for setting output/metadata.
@@ -215,6 +242,7 @@ class Tracer:
             name: Span name.
             input: Input data written to span_start.
             metadata: Initial metadata. Can be updated via the yielded Span object.
+            tags: List of string tags for filtering/categorization.
             kind: Optional span categorization (e.g. "llm", "tool", "retriever").
         """
         span_id = _uuid()
@@ -224,6 +252,8 @@ class Tracer:
         span_obj = Span(span_id, name, parent_id)
         if metadata:
             span_obj.metadata.update(metadata)
+        if tags:
+            span_obj.tags = list(tags)
 
         start_event: dict[str, Any] = {
             "type": "span_start",
@@ -236,11 +266,13 @@ class Tracer:
             start_event["kind"] = kind
         if input is not None:
             start_event["input"] = input
+        if span_obj.tags:
+            start_event["tags"] = span_obj.tags
         if span_obj.metadata:
             start_event["metadata"] = span_obj.metadata.copy()
         self._write(start_event)
 
-        _push_span(span_id)
+        _push_span(span_obj)
         try:
             yield span_obj
         except BaseException as exc:
@@ -260,6 +292,8 @@ class Tracer:
             }
             if kind is not None:
                 end_event["kind"] = kind
+            if span_obj.tags:
+                end_event["tags"] = span_obj.tags
             if span_obj.metadata:
                 end_event["metadata"] = span_obj.metadata
             self._write(end_event)
@@ -281,6 +315,8 @@ class Tracer:
         }
         if kind is not None:
             end_event["kind"] = kind
+        if span_obj.tags:
+            end_event["tags"] = span_obj.tags
         if span_obj.output is not None:
             end_event["output"] = span_obj.output
         if span_obj.metadata:

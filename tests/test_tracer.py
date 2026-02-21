@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from traqo import Tracer, get_tracer
+from traqo import Tracer, get_current_span, get_tracer, trace
 from tests.conftest import read_events
 
 
@@ -256,6 +256,151 @@ class TestCaptureContent:
         events = read_events(trace_file)
         start = [e for e in events if e["type"] == "span_start"][0]
         assert start["input"] == {"data": "visible"}
+
+
+class TestTraceInputOutput:
+    def test_trace_input_in_trace_start(self, trace_file: Path):
+        with Tracer(trace_file, input={"query": "hello"}):
+            pass
+        events = read_events(trace_file)
+        assert events[0]["input"] == {"query": "hello"}
+
+    def test_trace_output_in_trace_end(self, trace_file: Path):
+        with Tracer(trace_file) as tracer:
+            tracer.set_output({"response": "world"})
+        events = read_events(trace_file)
+        assert events[-1]["output"] == {"response": "world"}
+
+    def test_trace_input_and_output(self, trace_file: Path):
+        with Tracer(trace_file, input={"query": "weather"}) as tracer:
+            tracer.set_output({"response": "sunny"})
+        events = read_events(trace_file)
+        assert events[0]["input"] == {"query": "weather"}
+        assert events[-1]["output"] == {"response": "sunny"}
+
+    def test_trace_no_input_omitted(self, trace_file: Path):
+        with Tracer(trace_file):
+            pass
+        events = read_events(trace_file)
+        assert "input" not in events[0]
+
+    def test_trace_no_output_omitted(self, trace_file: Path):
+        with Tracer(trace_file):
+            pass
+        events = read_events(trace_file)
+        assert "output" not in events[-1]
+
+
+class TestTags:
+    def test_trace_tags(self, trace_file: Path):
+        with Tracer(trace_file, tags=["production", "chatbot"]):
+            pass
+        events = read_events(trace_file)
+        assert events[0]["tags"] == ["production", "chatbot"]
+
+    def test_trace_no_tags_omitted(self, trace_file: Path):
+        with Tracer(trace_file):
+            pass
+        events = read_events(trace_file)
+        assert "tags" not in events[0]
+
+    def test_span_tags(self, trace_file: Path):
+        with Tracer(trace_file) as tracer:
+            with tracer.span("classify", tags=["llm", "gpt-4o"]):
+                pass
+        events = read_events(trace_file)
+        start = [e for e in events if e["type"] == "span_start"][0]
+        end = [e for e in events if e["type"] == "span_end"][0]
+        assert start["tags"] == ["llm", "gpt-4o"]
+        assert end["tags"] == ["llm", "gpt-4o"]
+
+    def test_span_no_tags_omitted(self, trace_file: Path):
+        with Tracer(trace_file) as tracer:
+            with tracer.span("step"):
+                pass
+        events = read_events(trace_file)
+        start = [e for e in events if e["type"] == "span_start"][0]
+        end = [e for e in events if e["type"] == "span_end"][0]
+        assert "tags" not in start
+        assert "tags" not in end
+
+    def test_span_tags_on_error(self, trace_file: Path):
+        with Tracer(trace_file) as tracer:
+            with pytest.raises(ValueError):
+                with tracer.span("failing", tags=["important"]):
+                    raise ValueError("boom")
+        events = read_events(trace_file)
+        end = [e for e in events if e["type"] == "span_end"][0]
+        assert end["tags"] == ["important"]
+        assert end["status"] == "error"
+
+    def test_decorator_tags(self, trace_file: Path):
+        @trace(tags=["auth", "v2"])
+        def login(user: str) -> bool:
+            return True
+
+        with Tracer(trace_file):
+            login("alice")
+
+        events = read_events(trace_file)
+        start = [e for e in events if e["type"] == "span_start"][0]
+        assert start["tags"] == ["auth", "v2"]
+
+
+class TestThreadId:
+    def test_thread_id_in_trace_start(self, trace_file: Path):
+        with Tracer(trace_file, thread_id="conv-123"):
+            pass
+        events = read_events(trace_file)
+        assert events[0]["thread_id"] == "conv-123"
+
+    def test_thread_id_omitted_when_none(self, trace_file: Path):
+        with Tracer(trace_file):
+            pass
+        events = read_events(trace_file)
+        assert "thread_id" not in events[0]
+
+
+class TestGetCurrentSpan:
+    def test_get_current_span_outside(self):
+        assert get_current_span() is None
+
+    def test_get_current_span_inside_span(self, trace_file: Path):
+        with Tracer(trace_file) as tracer:
+            assert get_current_span() is None
+            with tracer.span("outer") as outer:
+                assert get_current_span() is outer
+                with tracer.span("inner") as inner:
+                    assert get_current_span() is inner
+                assert get_current_span() is outer
+            assert get_current_span() is None
+
+    def test_get_current_span_from_decorator(self, trace_file: Path):
+        captured_span = None
+
+        @trace()
+        def my_fn() -> str:
+            nonlocal captured_span
+            captured_span = get_current_span()
+            captured_span.set_metadata("custom", "value")
+            return "done"
+
+        with Tracer(trace_file):
+            my_fn()
+
+        assert captured_span is not None
+        assert captured_span.name == "my_fn"
+        events = read_events(trace_file)
+        end = [e for e in events if e["type"] == "span_end"][0]
+        assert end["metadata"]["custom"] == "value"
+
+    def test_get_current_span_no_tracer(self):
+        @trace()
+        def my_fn() -> str:
+            assert get_current_span() is None
+            return "done"
+
+        my_fn()
 
 
 class TestCreatesDirs:

@@ -15,18 +15,22 @@ Last line is always `trace_end` with summary stats. Start there.
 
 | Event | Key Fields |
 |-------|------------|
-| `trace_start` | `tracer_version`, `metadata` (run_id, model, etc.) |
-| `span_start` | `id`, `parent_id`, `name`, `input`, `metadata`, `kind` |
-| `span_end` | `id`, `parent_id`, `name`, `duration_s`, `status`, `output`, `metadata`, `kind` |
+| `trace_start` | `tracer_version`, `input`, `metadata`, `tags`, `thread_id` |
+| `span_start` | `id`, `parent_id`, `name`, `input`, `metadata`, `tags`, `kind` |
+| `span_end` | `id`, `parent_id`, `name`, `duration_s`, `status`, `output`, `metadata`, `tags`, `kind` |
 | `event` | `name`, `data` (arbitrary dict) |
-| `trace_end` | `duration_s`, `stats`, `children` (child trace paths) |
+| `trace_end` | `duration_s`, `output`, `stats`, `children` |
 
-Every event has `id` and `parent_id` for tree reconstruction. The `kind` field categorizes spans (e.g. `"llm"`, `"tool"`, `"retriever"`). LLM-specific data (`model`, `provider`, `token_usage`) lives in `metadata`.
+Every event has `id` and `parent_id` for tree reconstruction. The `kind` field categorizes spans (e.g. `"llm"`, `"tool"`, `"retriever"`). LLM-specific data (`model`, `provider`, `token_usage`) lives in `metadata`. `tags` is a list of strings for filtering. `thread_id` groups traces into conversations.
 
 ## Event Structure
 
 ```json
-{"type":"span_start","id":"x1y2z3","parent_id":"a1b2c3","ts":"2026-02-20T10:00:01Z","name":"classify","kind":"llm","input":[{"role":"user","content":"..."}],"metadata":{"provider":"openai","model":"gpt-4o"}}
+{"type":"trace_start","ts":"2026-02-20T10:00:00Z","tracer_version":"0.2.0","input":{"query":"hello"},"tags":["production"],"thread_id":"conv-123","metadata":{"run_id":"abc"}}
+```
+
+```json
+{"type":"span_start","id":"x1y2z3","parent_id":"a1b2c3","ts":"2026-02-20T10:00:01Z","name":"classify","kind":"llm","tags":["gpt-4o"],"input":[{"role":"user","content":"..."}],"metadata":{"provider":"openai","model":"gpt-4o"}}
 ```
 
 ```json
@@ -34,7 +38,7 @@ Every event has `id` and `parent_id` for tree reconstruction. The `kind` field c
 ```
 
 ```json
-{"type":"trace_end","ts":"2026-02-20T10:05:00Z","duration_s":300.0,"stats":{"spans":15,"events":5,"total_input_tokens":45000,"total_output_tokens":12000,"errors":0},"children":[{"name":"agent_a","path":"traces/agent_a.jsonl","duration_s":45.2,"spans":3,"total_input_tokens":5000,"total_output_tokens":2000}]}
+{"type":"trace_end","ts":"2026-02-20T10:05:00Z","duration_s":300.0,"output":{"response":"..."},"stats":{"spans":15,"events":5,"total_input_tokens":45000,"total_output_tokens":12000,"errors":0},"children":[{"name":"agent_a","path":"traces/agent_a.jsonl","duration_s":45.2,"spans":3,"total_input_tokens":5000,"total_output_tokens":2000}]}
 ```
 
 ## Common Queries
@@ -74,6 +78,15 @@ grep '"kind":"llm"' trace.jsonl | grep span_end | jq '{name, model: .metadata.mo
 grep '"provider":"openai"' trace.jsonl | jq .
 ```
 
+### Tags and Threads
+```bash
+# Find traces by tag
+grep '"tags"' traces/**/*.jsonl | grep production
+
+# Find all traces in a conversation
+grep '"thread_id":"conv-123"' traces/**/*.jsonl | jq .
+```
+
 ### Span Tree
 ```bash
 # All spans
@@ -93,6 +106,10 @@ SELECT metadata->>'model' as model,
 FROM read_json('traces/**/*.jsonl')
 WHERE kind = 'llm'
 GROUP BY model;
+
+-- All traces in a conversation thread
+SELECT * FROM read_json('traces/**/*.jsonl')
+WHERE thread_id = 'conv-123' AND type = 'trace_start';
 ```
 
 ## Adding Tracing to Code
@@ -105,9 +122,21 @@ from traqo import trace
 async def my_function(data):
     return process(data)
 
-@trace(metadata={"component": "auth"}, kind="tool")
+@trace(metadata={"component": "auth"}, tags=["auth"], kind="tool")
 def login(user):
     return authenticate(user)
+```
+
+### Access current span from decorated function
+```python
+from traqo import trace, get_current_span
+
+@trace()
+def classify(text):
+    span = get_current_span()
+    if span:
+        span.set_metadata("confidence", 0.95)
+    return result
 ```
 
 ### Wrap an LLM client
@@ -128,7 +157,7 @@ from traqo import get_tracer
 
 tracer = get_tracer()
 if tracer:
-    with tracer.span("my_step", input=data, metadata={"model": "gpt-4o"}, kind="llm") as span:
+    with tracer.span("my_step", input=data, metadata={"model": "gpt-4o"}, tags=["llm"], kind="llm") as span:
         result = call_llm()
         span.set_metadata("token_usage", {"input_tokens": 100, "output_tokens": 50})
         span.set_output(result)
@@ -147,8 +176,15 @@ if tracer:
 from traqo import Tracer
 from pathlib import Path
 
-with Tracer(Path("traces/run.jsonl"), metadata={"run_id": "abc123"}):
-    await main()
+with Tracer(
+    Path("traces/run.jsonl"),
+    input={"query": "hello"},
+    metadata={"run_id": "abc123"},
+    tags=["production"],
+    thread_id="conv-456",
+) as tracer:
+    result = await main()
+    tracer.set_output({"response": result})
 ```
 
 ### Child tracer for concurrent agents

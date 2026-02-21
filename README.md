@@ -11,8 +11,8 @@ async def classify(text: str) -> str:
     response = await llm.chat(text)
     return response
 
-with Tracer(Path("traces/run.jsonl")):
-    await classify("Is this a bug?")
+with Tracer(Path("traces/run.jsonl"), input={"query": "Is this a bug?"}):
+    result = await classify("Is this a bug?")
 ```
 
 Your traces are just `.jsonl` files. Read them with `grep`, query them with DuckDB, or hand them to an AI assistant.
@@ -53,8 +53,13 @@ async def summarize(text: str) -> str:
 async def pipeline(docs: list[str]) -> list[str]:
     return [await summarize(doc) for doc in docs]
 
-async with Tracer(Path("traces/my_run.jsonl")):
+async with Tracer(
+    Path("traces/my_run.jsonl"),
+    input={"docs": ["doc1", "doc2"]},
+    tags=["production"],
+) as tracer:
     results = await pipeline(["doc1", "doc2"])
+    tracer.set_output({"count": len(results)})
 ```
 
 ### 2. Auto-trace LLM calls
@@ -78,14 +83,15 @@ from traqo.integrations.anthropic import traced_anthropic
 from traqo.integrations.langchain import traced_model
 ```
 
-### 3. Use metadata and kind for rich spans
+### 3. Use metadata, tags, and kind
 
 ```python
-with Tracer(Path("traces/run.jsonl")) as tracer:
+with Tracer(Path("traces/run.jsonl"), tags=["prod"]) as tracer:
     with tracer.span(
         "classify",
         input={"text": "Is this a bug?"},
         metadata={"model": "gpt-4o", "provider": "openai"},
+        tags=["llm"],
         kind="llm",
     ) as span:
         result = call_llm(...)
@@ -93,7 +99,21 @@ with Tracer(Path("traces/run.jsonl")) as tracer:
         span.set_output(result)
 ```
 
-### 4. Read your traces
+### 4. Access the current span from anywhere
+
+```python
+from traqo import trace, get_current_span
+
+@trace()
+def classify(text: str) -> str:
+    span = get_current_span()
+    if span:
+        span.set_metadata("confidence", 0.95)
+        span.set_metadata("model", "gpt-4o")
+    return result
+```
+
+### 5. Read your traces
 
 ```bash
 # Last line is always trace_end with summary stats
@@ -101,6 +121,9 @@ tail -1 traces/my_run.jsonl | jq .
 
 # All LLM spans
 grep '"kind":"llm"' traces/my_run.jsonl | jq .
+
+# Filter by tag
+grep '"tags"' traces/my_run.jsonl | jq .
 
 # Errors
 grep '"status":"error"' traces/**/*.jsonl
@@ -111,39 +134,47 @@ grep '"token_usage"' traces/**/*.jsonl | jq '.metadata.token_usage'
 
 ## API Reference
 
-### `Tracer(path, *, metadata=None, capture_content=True)`
+### `Tracer(path, *, input=None, metadata=None, tags=None, thread_id=None, capture_content=True)`
 
 Creates a trace session writing to a JSONL file. Use as a context manager.
 
 ```python
 with Tracer(
     Path("traces/run.jsonl"),
-    metadata={"run_id": "abc123", "model": "gpt-4o"},
+    input={"query": "What is the weather?"},
+    metadata={"run_id": "abc123"},
+    tags=["production", "chatbot"],
+    thread_id="conv-456",
     capture_content=False,  # Integrations omit LLM input/output
-):
-    await my_pipeline()
+) as tracer:
+    result = await my_pipeline()
+    tracer.set_output({"response": result})
 ```
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `path` | `Path` | required | JSONL file path. Parent dirs created automatically. |
+| `input` | `Any` | `None` | Trace input, written to `trace_start`. |
 | `metadata` | `dict` | `{}` | Arbitrary metadata written to `trace_start`. |
+| `tags` | `list[str]` | `[]` | Tags for filtering/categorization, written to `trace_start`. |
+| `thread_id` | `str` | `None` | Conversation/thread grouping ID, written to `trace_start`. |
 | `capture_content` | `bool` | `True` | If `False`, integrations omit LLM inputs/outputs. |
 
 **Methods:**
 
 | Method | Description |
 |---|---|
-| `span(name, *, input=, metadata=, kind=)` | Span context manager. Yields a `Span` object. |
-| `log(name, data)` | Write a custom event |
-| `child(name, path)` | Create a child tracer writing to a separate file |
+| `span(name, *, input=, metadata=, tags=, kind=)` | Span context manager. Yields a `Span` object. |
+| `set_output(value)` | Set trace-level output (written to `trace_end`). |
+| `log(name, data)` | Write a custom event. |
+| `child(name, path)` | Create a child tracer writing to a separate file. |
 
 ### `Span`
 
 Mutable handle yielded by `tracer.span()`. Set output and metadata during execution.
 
 ```python
-with tracer.span("my_step", input=data, kind="tool") as span:
+with tracer.span("my_step", input=data, tags=["important"], kind="tool") as span:
     result = do_work()
     span.set_output(result)
     span.set_metadata("latency_ms", 42)
@@ -156,7 +187,7 @@ with tracer.span("my_step", input=data, kind="tool") as span:
 | `set_metadata(key, value)` | Set a metadata key |
 | `update_metadata(dict)` | Merge a dict into metadata |
 
-### `@trace(name=None, *, capture_input=True, capture_output=True, metadata=None, kind=None)`
+### `@trace(name=None, *, capture_input=True, capture_output=True, metadata=None, tags=None, kind=None)`
 
 Decorator that wraps a function in a span. Works with sync and async functions.
 
@@ -169,12 +200,27 @@ async def my_step(data: list) -> dict:
 def sensitive_step(secret: str) -> str:
     return handle(secret)
 
-@trace(metadata={"component": "auth"}, kind="tool")
+@trace(metadata={"component": "auth"}, tags=["auth"], kind="tool")
 def login(user: str) -> bool:
     return authenticate(user)
 ```
 
 When no tracer is active, `@trace` is a pure passthrough with zero overhead.
+
+### `get_current_span() -> Span | None`
+
+Returns the current active span, or `None`. Use inside `@trace`-decorated functions to set metadata dynamically.
+
+```python
+from traqo import trace, get_current_span
+
+@trace()
+def my_function(text: str) -> str:
+    span = get_current_span()
+    if span:
+        span.set_metadata("custom_key", "custom_value")
+    return process(text)
+```
 
 ### `get_tracer() -> Tracer | None`
 
@@ -217,13 +263,13 @@ Every line is a self-contained JSON object. Five event types:
 
 | Type | When | Key Fields |
 |---|---|---|
-| `trace_start` | Tracer enters | `tracer_version`, `metadata` |
-| `span_start` | Span begins | `id`, `parent_id`, `name`, `input`, `metadata`, `kind` |
-| `span_end` | Span ends | `id`, `duration_s`, `status`, `output`, `metadata`, `kind` |
+| `trace_start` | Tracer enters | `tracer_version`, `input`, `metadata`, `tags`, `thread_id` |
+| `span_start` | Span begins | `id`, `parent_id`, `name`, `input`, `metadata`, `tags`, `kind` |
+| `span_end` | Span ends | `id`, `duration_s`, `status`, `output`, `metadata`, `tags`, `kind` |
 | `event` | Custom checkpoint | `name`, `data` |
-| `trace_end` | Tracer exits | `duration_s`, `stats`, `children` |
+| `trace_end` | Tracer exits | `duration_s`, `output`, `stats`, `children` |
 
-The `kind` field categorizes spans (e.g. `"llm"`, `"tool"`, `"retriever"`). Omitted when not set.
+The `kind` field categorizes spans (e.g. `"llm"`, `"tool"`, `"retriever"`). The `tags` field is a list of strings for filtering. Both are omitted when not set.
 
 The `metadata` dict is the universal extension point. LLM-specific data like `model`, `provider`, and `token_usage` are stored there.
 
@@ -239,6 +285,11 @@ SELECT metadata->>'model' as model,
 FROM read_json('traces/**/*.jsonl')
 WHERE kind = 'llm'
 GROUP BY model;
+
+-- All traces for a conversation thread
+SELECT * FROM read_json('traces/**/*.jsonl')
+WHERE thread_id = 'conv-123'
+AND type = 'trace_start';
 ```
 
 ## License
