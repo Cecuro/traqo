@@ -5,11 +5,15 @@ from __future__ import annotations
 import logging
 import threading
 import uuid
+from collections.abc import Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from traqo.backend import Backend
 
 from traqo._version import __version__
 from traqo.serialize import serialize_error, to_json
@@ -100,6 +104,7 @@ class Tracer:
         tags: list[str] | None = None,
         thread_id: str | None = None,
         capture_content: bool = True,
+        backends: Sequence[Backend] | None = None,
     ) -> None:
         import traqo
 
@@ -115,6 +120,15 @@ class Tracer:
         self._token = None
         self._start_time: datetime | None = None
         self._output: Any = None
+
+        # Backends
+        self._backends: list[Backend] = list(backends) if backends else []
+        for b in self._backends:
+            for method in ("on_event", "on_trace_complete", "close"):
+                if not callable(getattr(b, method, None)):
+                    raise TypeError(
+                        f"Backend {b!r} is missing required callable method {method!r}"
+                    )
 
         # Stats
         self._stats_spans = 0
@@ -149,6 +163,35 @@ class Tracer:
                 self._file.flush()
         except Exception:
             logger.warning("traqo: failed to write event", exc_info=True)
+        # Notify backends (outside the lock).
+        # The event dict is shared across backends and should not be mutated.
+        self._notify_backends_event(event)
+
+    def _notify_backends_event(self, event: dict[str, Any]) -> None:
+        """Notify all backends of a new event. Never raises."""
+        for backend in self._backends:
+            try:
+                backend.on_event(event)
+            except Exception:
+                logger.warning(
+                    "traqo: backend on_event failed for %s",
+                    type(backend).__name__,
+                    exc_info=True,
+                )
+
+    def _notify_backends_complete(self) -> None:
+        """Notify all backends that the trace file is complete. Never raises."""
+        if self._disabled or not self._backends:
+            return
+        for backend in self._backends:
+            try:
+                backend.on_trace_complete(self._path)
+            except Exception:
+                logger.warning(
+                    "traqo: backend on_trace_complete failed for %s",
+                    type(backend).__name__,
+                    exc_info=True,
+                )
 
     def _accumulate_tokens(self, span_obj: Span) -> None:
         """If span metadata contains token_usage, accumulate into tracer stats."""
@@ -201,6 +244,7 @@ class Tracer:
             end_event["children"] = self._children
         self._write(end_event)
         self._close()
+        self._notify_backends_complete()
         if self._token is not None:
             _active_tracer.reset(self._token)
             self._token = None
@@ -337,6 +381,7 @@ class Tracer:
             path,
             metadata={"parent_trace": str(self._path)},
             capture_content=self._capture_content,
+            backends=self._backends,
         )
         child_tracer._parent = self
         child_tracer._child_name = name

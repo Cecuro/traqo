@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 
 from traqo._version import __version__
+from traqo.backend import Backend, flush_backends, shutdown_backends
 from traqo.decorator import trace
 from traqo.tracer import Span, Tracer, get_current_span, get_tracer
 
@@ -24,6 +25,7 @@ def enable() -> None:
 
 
 __all__ = [
+    "Backend",
     "Span",
     "Tracer",
     "trace",
@@ -31,5 +33,7 @@ __all__ = [
     "get_current_span",
     "disable",
     "enable",
+    "flush_backends",
+    "shutdown_backends",
     "__version__",
 ]
