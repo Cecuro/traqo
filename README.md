@@ -132,6 +132,18 @@ grep '"status":"error"' traces/**/*.jsonl
 grep '"token_usage"' traces/**/*.jsonl | jq '.metadata.token_usage'
 ```
 
+## Trace Viewer UI
+
+Browse and inspect traces in your browser. Zero dependencies — uses Python's built-in HTTP server.
+
+```bash
+traqo ui ./traces                  # Serve traces on http://localhost:7600
+traqo ui ./traces --port 8080     # Custom port
+python -m traqo ui ./traces       # Alternative invocation
+```
+
+Features: folder navigation, search/filter, span tree with waterfall timing, JSON viewer with syntax highlighting, token usage visualization, keyboard shortcuts (Escape to go back, ? for help).
+
 ## API Reference
 
 ### `Tracer(path, *, input=None, metadata=None, tags=None, thread_id=None, capture_content=True)`

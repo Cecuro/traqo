@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>traqo — Trace Viewer</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header>
+    <span class="logo" data-action="go-root">traqo</span>
+    <button class="back-btn" id="back-btn" data-action="go-back" title="Back to traces">&larr;</button>
+    <nav class="breadcrumb" id="breadcrumb"></nav>
+    <button class="help-btn" data-action="toggle-guide" title="Help (?)">?</button>
+  </header>
+
+  <div class="guide-overlay" id="guide-overlay">
+    <div class="guide-panel">
+      <button class="close-btn" data-action="toggle-guide">&times;</button>
+      <h2>Welcome to traqo</h2>
+      <p>traqo records what your LLM application does — every API call, tool use, and decision — as structured trace files.</p>
+
+      <h3>Navigating</h3>
+      <p><strong>Folders</strong> group related traces. Click a folder to see what's inside. Use the breadcrumb path at the top to go back.</p>
+      <p><strong>Traces</strong> are individual runs of your application. Click one to see every step it took.</p>
+
+      <h3>Inside a trace</h3>
+      <p>The left panel shows the <strong>span tree</strong> — a timeline of operations your app performed. Each span is one step (an LLM call, a tool invocation, etc).</p>
+      <p>Click any span to see its <strong>input</strong>, <strong>output</strong>, <strong>token usage</strong>, and <strong>timing</strong> in the right panel.</p>
+
+      <h3>What the colors mean</h3>
+      <div class="shortcut-row"><span class="key" style="color:var(--blue)">llm</span> <span>LLM / model call</span></div>
+      <div class="shortcut-row"><span class="key" style="color:var(--purple)">tool</span> <span>Tool or function call</span></div>
+      <div class="shortcut-row"><span class="key" style="color:var(--green)">ok</span> <span>Completed successfully</span></div>
+      <div class="shortcut-row"><span class="key" style="color:var(--red)">error</span> <span>Something went wrong</span></div>
+
+      <h3>What the numbers mean</h3>
+      <div class="shortcut-row"><span class="key"><span style="color:var(--blue)">in</span> / <span style="color:var(--orange)">out</span></span> <span>Input / output tokens (LLM usage)</span></div>
+      <div class="shortcut-row"><span class="key">spans</span> <span>Number of operations in a trace</span></div>
+      <div class="shortcut-row"><span class="key">duration</span> <span>Wall-clock time</span></div>
+
+      <h3>Keyboard shortcuts</h3>
+      <div class="shortcut-row"><span class="key">Esc</span> <span>Go back / close dialog</span></div>
+      <div class="shortcut-row"><span class="key">?</span> <span>Toggle this help guide</span></div>
+      <div class="shortcut-row"><span class="key">&uarr; / &darr;</span> <span>Navigate spans in trace view</span></div>
+      <div class="shortcut-row"><span class="key">r</span> <span>Refresh trace list</span></div>
+
+      <h3>Tips</h3>
+      <p>Use <strong>Search</strong> to filter by name, tags, or thread ID. Use <strong>Status</strong> to show only errors.</p>
+      <p>Organize traces into folders by choosing your file path: <code>Tracer(Path("traces/my-agent/run.jsonl"))</code></p>
+    </div>
+  </div>
+
+  <div class="error-banner" id="error-banner">
+    <span id="error-msg"></span>
+    <button data-action="dismiss-error">&times;</button>
+  </div>
+
+  <main>
+    <div class="loading-overlay" id="loading"><div class="spinner"></div></div>
+
+    <div id="browse-view">
+      <div class="folder-header" id="folder-header"></div>
+      <div class="summary-strip" id="summary-strip"></div>
+      <div class="filter-bar">
+        <input type="text" id="search-input" placeholder="Search by name, tag, thread ID...">
+        <div class="dropdown" id="status-dropdown">
+          <button class="dropdown-toggle" data-action="toggle-dropdown" data-dropdown="status-dropdown">All statuses <span class="caret">&#9662;</span></button>
+          <div class="dropdown-menu">
+            <div class="dropdown-item selected" data-action="select-status" data-value="all"><span class="check">&#10003;</span>All statuses</div>
+            <div class="dropdown-item" data-action="select-status" data-value="ok"><span class="check"></span>OK only</div>
+            <div class="dropdown-item" data-action="select-status" data-value="error"><span class="check"></span>Errors only</div>
+          </div>
+        </div>
+        <div class="dropdown" id="tag-dropdown">
+          <button class="dropdown-toggle" data-action="toggle-dropdown" data-dropdown="tag-dropdown">All tags <span class="caret">&#9662;</span></button>
+          <div class="dropdown-menu" id="tag-menu"></div>
+        </div>
+        <button class="clear-btn" id="clear-filters" data-action="clear-filters">&times; Clear</button>
+      </div>
+      <div class="filter-info" id="filter-info"></div>
+      <div class="item-list" id="item-list"></div>
+      <div class="empty-state" id="empty-list" style="display:none">
+        <div class="msg">No traces found</div>
+      </div>
+    </div>
+
+    <div id="trace-detail">
+      <div class="summary-bar" id="summary-bar"></div>
+      <div class="detail-panels">
+        <div class="span-tree-panel">
+          <div class="span-tree" id="span-tree"></div>
+        </div>
+        <div class="span-detail-panel" id="span-detail">
+          <div class="empty-state"><div class="msg">Select a span to view details</div></div>
+        </div>
+      </div>
+    </div>
+  </main>
+  <footer style="flex-shrink:0;padding:8px 24px;border-top:1px solid var(--border);text-align:center;font-size:12px;color:var(--text-dim);">
+    Made with &hearts; &middot; <a href="https://github.com/Cecuro/traqo" target="_blank" rel="noopener" style="color:var(--text-muted);text-decoration:none;">GitHub</a>
+  </footer>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
