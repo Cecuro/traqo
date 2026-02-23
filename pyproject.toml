@@ -32,6 +32,9 @@ anthropic = ["anthropic>=0.40"]
 all = ["traqo[langchain,openai,anthropic]"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.24"]
 
+[project.scripts]
+traqo = "traqo.__main__:main"
+
 [project.urls]
 Homepage = "https://github.com/Cecuro/traqo"
 Repository = "https://github.com/Cecuro/traqo"
