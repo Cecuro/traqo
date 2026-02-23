@@ -224,3 +224,162 @@ class TestSelfExclusion:
         start = [e for e in events if e["type"] == "span_start"][0]
         assert "self" not in start.get("input", {})
         assert start["input"]["x"] == 5
+
+
+class TestIgnoreArguments:
+    def test_ignore_single_argument(self, trace_file: Path):
+        @trace(ignore_arguments=["password"])
+        def login(user: str, password: str) -> bool:
+            return True
+
+        with Tracer(trace_file):
+            login("alice", "secret123")
+
+        events = read_events(trace_file)
+        start = [e for e in events if e["type"] == "span_start"][0]
+        assert start["input"]["user"] == "alice"
+        assert "password" not in start["input"]
+
+    def test_ignore_multiple_arguments(self, trace_file: Path):
+        @trace(ignore_arguments=["api_key", "token"])
+        def call_api(url: str, api_key: str, token: str) -> str:
+            return "ok"
+
+        with Tracer(trace_file):
+            call_api("https://example.com", "key123", "tok456")
+
+        events = read_events(trace_file)
+        start = [e for e in events if e["type"] == "span_start"][0]
+        assert start["input"]["url"] == "https://example.com"
+        assert "api_key" not in start["input"]
+        assert "token" not in start["input"]
+
+    def test_ignore_nonexistent_argument(self, trace_file: Path):
+        @trace(ignore_arguments=["nonexistent"])
+        def fn(x: int) -> int:
+            return x
+
+        with Tracer(trace_file):
+            result = fn(42)
+
+        assert result == 42
+        events = read_events(trace_file)
+        start = [e for e in events if e["type"] == "span_start"][0]
+        assert start["input"]["x"] == 42
+
+    async def test_ignore_arguments_async(self, trace_file: Path):
+        @trace(ignore_arguments=["secret"])
+        async def fetch(url: str, secret: str) -> str:
+            return "data"
+
+        async with Tracer(trace_file):
+            result = await fetch("https://example.com", "s3cr3t")
+
+        assert result == "data"
+        events = read_events(trace_file)
+        start = [e for e in events if e["type"] == "span_start"][0]
+        assert start["input"]["url"] == "https://example.com"
+        assert "secret" not in start["input"]
+
+
+class TestGeneratorDecorator:
+    def test_sync_generator(self, trace_file: Path):
+        @trace()
+        def count(n: int):
+            for i in range(n):
+                yield i
+
+        with Tracer(trace_file):
+            items = list(count(3))
+
+        assert items == [0, 1, 2]
+        events = read_events(trace_file)
+        starts = [e for e in events if e["type"] == "span_start"]
+        ends = [e for e in events if e["type"] == "span_end"]
+        assert len(starts) == 1
+        assert starts[0]["name"] == "count"
+        assert starts[0]["input"] == {"n": 3}
+        assert len(ends) == 1
+        assert ends[0]["status"] == "ok"
+        assert ends[0]["output"] == [0, 1, 2]
+
+    def test_sync_generator_no_tracer_passthrough(self):
+        @trace()
+        def count(n: int):
+            for i in range(n):
+                yield i
+
+        items = list(count(3))
+        assert items == [0, 1, 2]
+
+    def test_sync_generator_capture_output_false(self, trace_file: Path):
+        @trace(capture_output=False)
+        def count(n: int):
+            for i in range(n):
+                yield i
+
+        with Tracer(trace_file):
+            items = list(count(3))
+
+        assert items == [0, 1, 2]
+        events = read_events(trace_file)
+        end = [e for e in events if e["type"] == "span_end"][0]
+        assert "output" not in end
+
+    def test_sync_generator_empty(self, trace_file: Path):
+        @trace()
+        def empty():
+            return
+            yield  # noqa: unreachable
+
+        with Tracer(trace_file):
+            items = list(empty())
+
+        assert items == []
+        events = read_events(trace_file)
+        end = [e for e in events if e["type"] == "span_end"][0]
+        assert "output" not in end  # Empty list means no output set
+
+    async def test_async_generator(self, trace_file: Path):
+        @trace()
+        async def acount(n: int):
+            for i in range(n):
+                yield i
+
+        async with Tracer(trace_file):
+            items = [item async for item in acount(3)]
+
+        assert items == [0, 1, 2]
+        events = read_events(trace_file)
+        starts = [e for e in events if e["type"] == "span_start"]
+        ends = [e for e in events if e["type"] == "span_end"]
+        assert len(starts) == 1
+        assert starts[0]["name"] == "acount"
+        assert starts[0]["input"] == {"n": 3}
+        assert len(ends) == 1
+        assert ends[0]["status"] == "ok"
+        assert ends[0]["output"] == [0, 1, 2]
+
+    async def test_async_generator_no_tracer_passthrough(self):
+        @trace()
+        async def acount(n: int):
+            for i in range(n):
+                yield i
+
+        items = [item async for item in acount(3)]
+        assert items == [0, 1, 2]
+
+    def test_generator_with_ignore_arguments(self, trace_file: Path):
+        @trace(ignore_arguments=["secret"])
+        def gen(n: int, secret: str):
+            for i in range(n):
+                yield i
+
+        with Tracer(trace_file):
+            items = list(gen(2, "hidden"))
+
+        assert items == [0, 1]
+        events = read_events(trace_file)
+        start = [e for e in events if e["type"] == "span_start"][0]
+        assert start["input"]["n"] == 2
+        assert "secret" not in start["input"]

@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import math
+import traceback as _traceback_mod
 from datetime import date, datetime
 from enum import Enum
 from pathlib import Path
@@ -12,6 +13,7 @@ from typing import Any
 from uuid import UUID
 
 _MAX_ERROR_LENGTH = 500
+_MAX_TRACEBACK_LENGTH = 2000
 
 
 def _is_numpy(value: Any) -> bool:
@@ -124,7 +126,12 @@ def serialize_error(exc: BaseException) -> dict[str, str]:
     msg = str(exc)
     if len(msg) > _MAX_ERROR_LENGTH:
         msg = msg[:_MAX_ERROR_LENGTH] + "..."
-    return {"type": type(exc).__name__, "message": msg}
+    tb = _traceback_mod.format_exc()
+    if tb == "NoneType: None\n":
+        tb = "".join(_traceback_mod.format_exception(type(exc), exc, exc.__traceback__))
+    if len(tb) > _MAX_TRACEBACK_LENGTH:
+        tb = tb[:_MAX_TRACEBACK_LENGTH] + "..."
+    return {"type": type(exc).__name__, "message": msg, "traceback": tb}
 
 
 def json_default(obj: Any) -> Any:

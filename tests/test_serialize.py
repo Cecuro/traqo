@@ -294,12 +294,32 @@ class TestSerializeArgs:
 class TestSerializeError:
     def test_basic(self):
         result = serialize_error(ValueError("test error"))
-        assert result == {"type": "ValueError", "message": "test error"}
+        assert result["type"] == "ValueError"
+        assert result["message"] == "test error"
+        assert "traceback" in result
+        assert "ValueError: test error" in result["traceback"]
 
     def test_truncation(self):
         long_msg = "x" * 1000
         result = serialize_error(RuntimeError(long_msg))
         assert len(result["message"]) == 503  # 500 + "..."
+
+    def test_traceback_from_handler(self):
+        """Traceback captured from a real exception handler."""
+        try:
+            raise RuntimeError("boom")
+        except RuntimeError as exc:
+            result = serialize_error(exc)
+        assert "RuntimeError: boom" in result["traceback"]
+        assert "raise RuntimeError" in result["traceback"]
+
+    def test_traceback_truncation(self):
+        """Very long tracebacks get truncated."""
+        try:
+            raise RuntimeError("x" * 3000)
+        except RuntimeError as exc:
+            result = serialize_error(exc)
+        assert len(result["traceback"]) <= 2003 + 10  # _MAX_TRACEBACK_LENGTH + "..." + margin
 
 
 class TestToJson:

@@ -21,7 +21,7 @@ from traqo.serialize import serialize_error, to_json
 logger = logging.getLogger(__name__)
 
 _active_tracer: ContextVar[Tracer | None] = ContextVar("_active_tracer", default=None)
-_span_stack: ContextVar[list[Span]] = ContextVar("_span_stack", default=[])
+_span_stack: ContextVar[tuple[Span, ...]] = ContextVar("_span_stack", default=())
 
 
 def get_tracer() -> Tracer | None:
@@ -35,22 +35,22 @@ def get_tracer() -> Tracer | None:
 
 def get_current_span() -> Span | None:
     """Return the current active Span, or None if no span is active."""
-    stack = _span_stack.get([])
+    stack = _span_stack.get(())
     return stack[-1] if stack else None
 
 
 def _get_parent_id() -> str | None:
-    stack = _span_stack.get([])
+    stack = _span_stack.get(())
     return stack[-1].id if stack else None
 
 
 def _push_span(span_obj: Span) -> None:
-    stack = _span_stack.get([])
-    _span_stack.set([*stack, span_obj])
+    stack = _span_stack.get(())
+    _span_stack.set(stack + (span_obj,))
 
 
 def _pop_span() -> None:
-    stack = _span_stack.get([])
+    stack = _span_stack.get(())
     if stack:
         _span_stack.set(stack[:-1])
 

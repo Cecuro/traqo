@@ -377,6 +377,286 @@ class TraqoCallback(BaseCallbackHandler):
         tracer._stats_spans += 1
         tracer._stats_errors += 1
 
+    # -- Retriever callbacks --
+
+    def on_retriever_start(
+        self,
+        serialized: dict[str, Any],
+        query: str,
+        *,
+        run_id: UUID,
+        parent_run_id: UUID | None = None,
+        **kwargs: Any,
+    ) -> None:
+        tracer = get_tracer()
+        if not tracer:
+            return
+
+        span_id = _uuid()
+        parent_id = self._resolve_parent_id(parent_run_id)
+        start = datetime.now(timezone.utc)
+        id_parts = serialized.get("id", [])
+        name = id_parts[-1] if id_parts else serialized.get("name", "retriever")
+
+        start_event: dict[str, Any] = {
+            "type": "span_start",
+            "id": span_id,
+            "parent_id": parent_id,
+            "name": name,
+            "ts": start.isoformat(),
+            "kind": "retriever",
+        }
+        if tracer._capture_content:
+            start_event["input"] = query
+
+        tracer._write(start_event)
+        self._runs[run_id] = {
+            "span_id": span_id,
+            "parent_id": parent_id,
+            "name": name,
+            "start": start,
+            "metadata": {},
+        }
+
+    def on_retriever_end(
+        self,
+        documents: Any,
+        *,
+        run_id: UUID,
+        parent_run_id: UUID | None = None,
+        **kwargs: Any,
+    ) -> None:
+        tracer = get_tracer()
+        if not tracer or run_id not in self._runs:
+            return
+
+        info = self._runs.pop(run_id)
+        duration = (datetime.now(timezone.utc) - info["start"]).total_seconds()
+        end_event: dict[str, Any] = {
+            "type": "span_end",
+            "id": info["span_id"],
+            "parent_id": info["parent_id"],
+            "name": info["name"],
+            "ts": _now(),
+            "duration_s": round(duration, 3),
+            "status": "ok",
+            "kind": "retriever",
+        }
+        if tracer._capture_content and documents:
+            end_event["output"] = [
+                {
+                    "page_content": getattr(doc, "page_content", str(doc)),
+                    "metadata": getattr(doc, "metadata", {}),
+                }
+                for doc in documents
+            ]
+
+        tracer._write(end_event)
+        tracer._stats_spans += 1
+
+    def on_retriever_error(
+        self,
+        error: BaseException,
+        *,
+        run_id: UUID,
+        parent_run_id: UUID | None = None,
+        **kwargs: Any,
+    ) -> None:
+        tracer = get_tracer()
+        if not tracer or run_id not in self._runs:
+            return
+
+        info = self._runs.pop(run_id)
+        duration = (datetime.now(timezone.utc) - info["start"]).total_seconds()
+        tracer._write({
+            "type": "span_end",
+            "id": info["span_id"],
+            "parent_id": info["parent_id"],
+            "name": info["name"],
+            "ts": _now(),
+            "duration_s": round(duration, 3),
+            "status": "error",
+            "kind": "retriever",
+            "error": serialize_error(error),
+        })
+        tracer._stats_spans += 1
+        tracer._stats_errors += 1
+
+    # -- Chain callbacks --
+
+    def on_chain_start(
+        self,
+        serialized: dict[str, Any],
+        inputs: dict[str, Any],
+        *,
+        run_id: UUID,
+        parent_run_id: UUID | None = None,
+        **kwargs: Any,
+    ) -> None:
+        tracer = get_tracer()
+        if not tracer:
+            return
+
+        span_id = _uuid()
+        parent_id = self._resolve_parent_id(parent_run_id)
+        start = datetime.now(timezone.utc)
+        id_parts = serialized.get("id", [])
+        name = id_parts[-1] if id_parts else serialized.get("name", "chain")
+
+        start_event: dict[str, Any] = {
+            "type": "span_start",
+            "id": span_id,
+            "parent_id": parent_id,
+            "name": name,
+            "ts": start.isoformat(),
+            "kind": "chain",
+        }
+        if tracer._capture_content:
+            start_event["input"] = inputs
+
+        tracer._write(start_event)
+        self._runs[run_id] = {
+            "span_id": span_id,
+            "parent_id": parent_id,
+            "name": name,
+            "start": start,
+            "metadata": {},
+        }
+
+    def on_chain_end(
+        self,
+        outputs: dict[str, Any],
+        *,
+        run_id: UUID,
+        parent_run_id: UUID | None = None,
+        **kwargs: Any,
+    ) -> None:
+        tracer = get_tracer()
+        if not tracer or run_id not in self._runs:
+            return
+
+        info = self._runs.pop(run_id)
+        duration = (datetime.now(timezone.utc) - info["start"]).total_seconds()
+        end_event: dict[str, Any] = {
+            "type": "span_end",
+            "id": info["span_id"],
+            "parent_id": info["parent_id"],
+            "name": info["name"],
+            "ts": _now(),
+            "duration_s": round(duration, 3),
+            "status": "ok",
+            "kind": "chain",
+        }
+        if tracer._capture_content:
+            end_event["output"] = outputs
+
+        tracer._write(end_event)
+        tracer._stats_spans += 1
+
+    def on_chain_error(
+        self,
+        error: BaseException,
+        *,
+        run_id: UUID,
+        parent_run_id: UUID | None = None,
+        **kwargs: Any,
+    ) -> None:
+        tracer = get_tracer()
+        if not tracer or run_id not in self._runs:
+            return
+
+        info = self._runs.pop(run_id)
+        duration = (datetime.now(timezone.utc) - info["start"]).total_seconds()
+        tracer._write({
+            "type": "span_end",
+            "id": info["span_id"],
+            "parent_id": info["parent_id"],
+            "name": info["name"],
+            "ts": _now(),
+            "duration_s": round(duration, 3),
+            "status": "error",
+            "kind": "chain",
+            "error": serialize_error(error),
+        })
+        tracer._stats_spans += 1
+        tracer._stats_errors += 1
+
+    # -- Agent callbacks --
+
+    def on_agent_action(
+        self,
+        action: Any,
+        *,
+        run_id: UUID,
+        parent_run_id: UUID | None = None,
+        **kwargs: Any,
+    ) -> None:
+        tracer = get_tracer()
+        if not tracer:
+            return
+
+        span_id = _uuid()
+        parent_id = self._resolve_parent_id(parent_run_id)
+        start = datetime.now(timezone.utc)
+        tool = getattr(action, "tool", "agent_action")
+
+        start_event: dict[str, Any] = {
+            "type": "span_start",
+            "id": span_id,
+            "parent_id": parent_id,
+            "name": tool,
+            "ts": start.isoformat(),
+            "kind": "agent",
+        }
+        if tracer._capture_content:
+            start_event["input"] = {
+                "tool": tool,
+                "tool_input": getattr(action, "tool_input", ""),
+                "log": getattr(action, "log", ""),
+            }
+
+        tracer._write(start_event)
+        self._runs[run_id] = {
+            "span_id": span_id,
+            "parent_id": parent_id,
+            "name": tool,
+            "start": start,
+            "metadata": {},
+        }
+
+    def on_agent_finish(
+        self,
+        finish: Any,
+        *,
+        run_id: UUID,
+        parent_run_id: UUID | None = None,
+        **kwargs: Any,
+    ) -> None:
+        tracer = get_tracer()
+        if not tracer or run_id not in self._runs:
+            return
+
+        info = self._runs.pop(run_id)
+        duration = (datetime.now(timezone.utc) - info["start"]).total_seconds()
+        end_event: dict[str, Any] = {
+            "type": "span_end",
+            "id": info["span_id"],
+            "parent_id": info["parent_id"],
+            "name": info["name"],
+            "ts": _now(),
+            "duration_s": round(duration, 3),
+            "status": "ok",
+            "kind": "agent",
+        }
+        if tracer._capture_content:
+            end_event["output"] = {
+                "return_values": getattr(finish, "return_values", {}),
+                "log": getattr(finish, "log", ""),
+            }
+
+        tracer._write(end_event)
+        tracer._stats_spans += 1
+
 
 def _extract_token_usage_from_response(response: LLMResult) -> dict[str, int]:
     """Extract token usage from an LLMResult (callback response format)."""
