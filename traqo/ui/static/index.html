@@ -23,6 +23,7 @@
   --yellow: #fbbf24;
   --blue: #60a5fa;
   --purple: #a78bfa;
+  --teal: #2dd4bf;
   --orange: #fb923c;
   --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -213,6 +214,7 @@ main { flex: 1; overflow: auto; }
 .badge-tag { background: rgba(108, 140, 255, 0.1); color: var(--accent); margin-right: 3px; }
 .badge-llm { background: rgba(96, 165, 250, 0.12); color: var(--blue); }
 .badge-tool { background: rgba(167, 139, 250, 0.12); color: var(--purple); }
+.badge-function { background: rgba(45, 212, 191, 0.12); color: var(--teal); }
 .badge-kind { background: rgba(251, 191, 36, 0.12); color: var(--yellow); }
 
 /* Tokens inline */
@@ -290,6 +292,7 @@ main { flex: 1; overflow: auto; }
 .span-node.error .waterfall-bar { background: var(--red); }
 .span-node .waterfall-bar[data-kind="llm"] { background: var(--blue); }
 .span-node .waterfall-bar[data-kind="tool"] { background: var(--purple); }
+.span-node .waterfall-bar[data-kind="function"] { background: var(--teal); }
 
 /* Detail panel */
 .detail-header {
@@ -375,12 +378,13 @@ main { flex: 1; overflow: auto; }
       <p><strong>Traces</strong> are individual runs of your application. Click one to see every step it took.</p>
 
       <h3>Inside a trace</h3>
-      <p>The left panel shows the <strong>span tree</strong> — a timeline of operations your app performed. Each span is one step (an LLM call, a tool invocation, etc).</p>
+      <p>The left panel shows the <strong>span tree</strong> — a timeline of operations your app performed. Each span is one step: an LLM call, an LLM tool invocation, or a Python function.</p>
       <p>Click any span to see its <strong>input</strong>, <strong>output</strong>, <strong>token usage</strong>, and <strong>timing</strong> in the right panel.</p>
 
       <h3>What the colors mean</h3>
-      <div class="shortcut-row"><span class="key" style="color:var(--blue)">llm</span> <span>LLM / model call</span></div>
-      <div class="shortcut-row"><span class="key" style="color:var(--purple)">tool</span> <span>Tool or function call</span></div>
+      <div class="shortcut-row"><span class="key" style="color:var(--blue)">llm</span> <span>LLM / model API call (OpenAI, Anthropic, etc.)</span></div>
+      <div class="shortcut-row"><span class="key" style="color:var(--purple)">tool</span> <span>LLM tool use — a function the model invoked</span></div>
+      <div class="shortcut-row"><span class="key" style="color:var(--teal)">function</span> <span>Regular Python function execution</span></div>
       <div class="shortcut-row"><span class="key" style="color:var(--green)">ok</span> <span>Completed successfully</span></div>
       <div class="shortcut-row"><span class="key" style="color:var(--red)">error</span> <span>Something went wrong</span></div>
 
@@ -778,7 +782,7 @@ function renderSpanTree() {
     const width = Math.max(((s1 - s0) / dur * 100), 1).toFixed(1);
     let h = `<div class="span-node ${span.status==='error'?'error':''}" style="--depth:${depth}" data-span-id="${span.id}" onclick="selectSpan('${span.id}')">
       <span class="status-dot ${span.status||'ok'}"></span>
-      ${span.kind ? `<span class="badge badge-${span.kind==='llm'?'llm':span.kind==='tool'?'tool':'kind'}">${esc(span.kind)}</span>` : ''}
+      ${span.kind ? `<span class="badge badge-${span.kind==='llm'?'llm':span.kind==='tool'?'tool':span.kind==='function'?'function':'kind'}">${esc(span.kind)}</span>` : ''}
       <span class="name">${esc(span.name)}</span>
       <div class="waterfall-container"><div class="waterfall-bg"></div><div class="waterfall-bar" data-kind="${span.kind||''}" style="left:${left}%;width:${width}%"></div></div>
       <span class="duration">${fmtDur(span.duration_s)}</span>
@@ -816,7 +820,7 @@ function selectSpan(spanId) {
 
   let h = `<div class="detail-header">
     <span class="name">${esc(span.name)}</span>
-    ${span.kind?`<span class="badge badge-${span.kind==='llm'?'llm':span.kind==='tool'?'tool':'kind'}">${esc(span.kind)}</span>`:''}
+    ${span.kind?`<span class="badge badge-${span.kind==='llm'?'llm':span.kind==='tool'?'tool':span.kind==='function'?'function':'kind'}">${esc(span.kind)}</span>`:''}
     <span class="badge ${span.status==='error'?'badge-error':'badge-ok'}">${span.status||'ok'}</span>
     <span class="duration">${fmtDur(span.duration_s)}</span></div>`;
 

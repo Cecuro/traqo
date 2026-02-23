@@ -18,11 +18,17 @@ def trace(
     capture_output: bool = True,
     metadata: dict[str, Any] | None = None,
     tags: list[str] | None = None,
-    kind: str | None = None,
+    kind: str = "function",
 ) -> Callable:
     """Decorator that wraps a function in a tracing span.
 
     When no tracer is active: pure passthrough, zero overhead.
+
+    The ``kind`` parameter categorises the span:
+      - ``"function"`` (default) — regular Python function execution
+      - ``"llm"`` — LLM / model API call
+      - ``"tool"`` — function invoked by an LLM via tool-use
+      - any custom string for domain-specific categories
     """
 
     def decorator(func: Callable) -> Callable:

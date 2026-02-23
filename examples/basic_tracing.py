@@ -4,7 +4,7 @@ Example: Basic traqo tracing — no API keys needed.
 Shows core concepts:
   - Trace lifecycle (trace_start → spans → trace_end)
   - Nested spans with parent-child relationships
-  - Metadata, tags, and kind fields
+  - Metadata, tags, and the kind field (llm, tool, function, etc.)
   - Token usage accumulation
   - Trace-level input/output
 
@@ -31,11 +31,11 @@ def main():
         thread_id="demo-001",
     ) as tracer:
 
-        # Span 1: a "tool" span grouping related work
+        # Span 1: a "retriever" span for data fetching
         with tracer.span(
             "search",
             input={"query": "Python programming language"},
-            kind="tool",
+            kind="retriever",
             tags=["retrieval"],
         ) as search:
             time.sleep(0.05)  # simulate work

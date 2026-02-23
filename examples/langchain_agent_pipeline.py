@@ -3,7 +3,7 @@ Example: Multi-step LangChain agent pipeline with traqo tracing.
 
 This shows how traqo captures a realistic agent workflow:
   1. A top-level trace wraps the entire session
-  2. A "tool" span groups related work (like an agent step)
+  2. A "function" span groups pipeline logic (regular Python code)
   3. Individual LLM calls are traced as nested "llm" spans
   4. Token usage, model info, and content are captured automatically
 
@@ -52,8 +52,8 @@ def main():
         thread_id="demo-conversation-001",
     ) as tracer:
 
-        # Agent step: "analyze" groups the two LLM calls
-        with tracer.span("analyze", input={"text": user_input}, kind="tool", tags=["pipeline"]) as step:
+        # Pipeline step: "analyze" groups the two LLM calls
+        with tracer.span("analyze", input={"text": user_input}, kind="function", tags=["pipeline"]) as step:
 
             # LLM call 1: classify
             classification = classify_llm.invoke(
