@@ -287,12 +287,7 @@ class Tracer:
             input: Input data written to span_start.
             metadata: Initial metadata. Can be updated via the yielded Span object.
             tags: List of string tags for filtering/categorization.
-            kind: Span categorization. Common values:
-                ``"llm"`` — LLM / model API call,
-                ``"tool"`` — function invoked by an LLM via tool-use,
-                ``"function"`` — regular Python function execution,
-                or any custom string. The ``@trace`` decorator defaults to
-                ``"function"``; manual ``tracer.span()`` defaults to None.
+            kind: Optional span categorization (e.g. "llm", "tool", "retriever").
         """
         span_id = _uuid()
         parent_id = _get_parent_id()

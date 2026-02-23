@@ -43,18 +43,8 @@ Backends are additive — the local JSONL file is always written as the source o
 
 `trace_start`, `span_start`, `span_end`, `event` (point-in-time log via `tracer.log()`), `trace_end`.
 
-### Span kind taxonomy
-
-The `kind` field categorises what a span represents:
-- **`"llm"`** — LLM / model API call (OpenAI, Anthropic, etc.)
-- **`"tool"`** — function invoked by an LLM via tool-use / function-calling
-- **`"function"`** — regular Python function execution (default for `@trace()` decorator)
-- Any custom string (e.g. `"retriever"`, `"embedding"`) for domain-specific categories
-
-`tracer.span()` defaults to `kind=None` (no kind written). The `@trace()` decorator defaults to `kind="function"`. Integrations set kind automatically (`"llm"` for model calls, `"tool"` for LangChain tool callbacks).
-
 ## Integration patterns
 
 - **OpenAI/Anthropic**: `traced_openai(client)` / `traced_anthropic(client)` return wrapped clients. Span kind is `"llm"`.
-- **LangChain callback**: `TraqoCallback()` passed via `config={"callbacks": [callback]}`. Maps LangChain `run_id` → traqo `span_id`. LLM calls → `kind="llm"`, tool calls → `kind="tool"`. Falls back to `_get_parent_id()` to nest under `@trace` decorator spans.
+- **LangChain callback**: `TraqoCallback()` passed via `config={"callbacks": [callback]}`. Maps LangChain `run_id` → traqo `span_id`. Falls back to `_get_parent_id()` to nest under `@trace` decorator spans.
 - **LangChain wrapper**: `traced_model(model)` returns a `TracedChatModel`. Has `bind_tools()` override because `BaseChatModel.bind_tools` raises `NotImplementedError` and `__getattr__` doesn't fire for methods defined on the class.

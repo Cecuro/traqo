@@ -4,372 +4,20 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>traqo — Trace Viewer</title>
-<style>
-:root {
-  --bg: #0f1117;
-  --bg-card: #181a20;
-  --bg-hover: #1e2028;
-  --bg-selected: #232630;
-  --border: #2a2d38;
-  --text: #e4e4e7;
-  --text-muted: #8b8d97;
-  --text-dim: #5a5c66;
-  --accent: #6c8cff;
-  --accent-dim: #3a4d8c;
-  --green: #34d399;
-  --green-dim: rgba(52, 211, 153, 0.12);
-  --red: #f87171;
-  --red-dim: rgba(248, 113, 113, 0.12);
-  --yellow: #fbbf24;
-  --blue: #60a5fa;
-  --purple: #a78bfa;
-  --teal: #2dd4bf;
-  --orange: #fb923c;
-  --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --radius: 8px;
-}
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-  font-family: var(--font-sans);
-  background: var(--bg);
-  color: var(--text);
-  line-height: 1.5;
-  overflow: hidden;
-  height: 100vh;
-}
-#app { display: flex; flex-direction: column; height: 100vh; }
-
-/* Header */
-header {
-  display: flex; align-items: center; gap: 16px;
-  padding: 12px 24px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-  background: var(--bg-card);
-}
-header .logo {
-  font-family: var(--font-mono); font-size: 16px; font-weight: 700;
-  color: var(--accent); letter-spacing: -0.5px;
-}
-.breadcrumb {
-  font-size: 13px; color: var(--text-muted);
-  display: flex; align-items: center; gap: 6px;
-}
-.breadcrumb a { color: var(--text-muted); text-decoration: none; cursor: pointer; }
-.breadcrumb a:hover { color: var(--text); }
-.breadcrumb .sep { color: var(--text-dim); }
-.breadcrumb .current { color: var(--text); }
-
-main { flex: 1; overflow: auto; }
-
-/* ===== BROWSE VIEW ===== */
-#browse-view { padding: 24px; }
-
-/* Summary strip */
-.summary-strip {
-  display: flex; gap: 24px; padding: 12px 16px;
-  background: var(--bg-card); border: 1px solid var(--border);
-  border-radius: var(--radius); margin-bottom: 16px;
-  align-items: center; flex-wrap: wrap;
-}
-.summary-strip .stat {
-  display: flex; align-items: baseline; gap: 5px;
-}
-.summary-strip .stat .val {
-  font-size: 16px; font-weight: 700; font-family: var(--font-mono);
-}
-.summary-strip .stat .lbl {
-  font-size: 12px; color: var(--text-muted);
-}
-
-/* Filter bar */
-.filter-bar {
-  display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap;
-}
-.filter-bar input, .filter-bar select {
-  background: var(--bg); border: 1px solid var(--border);
-  color: var(--text); padding: 7px 12px; border-radius: var(--radius);
-  font-size: 13px; outline: none;
-}
-.filter-bar input { min-width: 260px; }
-.filter-bar input:focus { border-color: var(--accent); }
-
-/* Unified list */
-.item-list {
-  border: 1px solid var(--border); border-radius: var(--radius);
-  overflow: hidden;
-}
-.item-row {
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
-  cursor: pointer;
-  transition: background 0.1s;
-}
-.item-row:last-child { border-bottom: none; }
-.item-row:hover { background: var(--bg-hover); }
-
-/* Row icon */
-.row-icon {
-  width: 32px; height: 32px; border-radius: 6px;
-  display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0; font-size: 14px;
-}
-.row-icon.folder {
-  background: rgba(108, 140, 255, 0.1); color: var(--accent);
-}
-.row-icon.folder svg { width: 16px; height: 16px; }
-.row-icon.trace {
-  background: rgba(52, 211, 153, 0.1); color: var(--green);
-}
-.row-icon.trace-error {
-  background: var(--red-dim); color: var(--red);
-}
-
-/* Row content */
-.row-main { flex: 1; min-width: 0; }
-.row-name {
-  font-size: 14px; font-weight: 500;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.row-desc {
-  font-size: 12px; color: var(--text-muted); margin-top: 1px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-
-/* Row meta (right side) */
-.row-meta {
-  display: flex; align-items: center; gap: 16px;
-  flex-shrink: 0;
-}
-.row-meta-item {
-  display: flex; flex-direction: column; align-items: flex-end;
-  min-width: 60px;
-}
-.row-meta-item .val {
-  font-size: 13px; font-family: var(--font-mono); font-weight: 500;
-}
-.row-meta-item .lbl {
-  font-size: 10px; color: var(--text-dim); text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
-.row-chevron { color: var(--text-dim); font-size: 16px; flex-shrink: 0; margin-left: 4px; }
-
-/* Help button & guide */
-.help-btn {
-  margin-left: auto; background: none; border: 1px solid var(--border);
-  color: var(--text-muted); width: 28px; height: 28px; border-radius: 50%;
-  font-size: 14px; cursor: pointer; display: flex; align-items: center;
-  justify-content: center; transition: border-color 0.15s, color 0.15s;
-  flex-shrink: 0; font-weight: 600;
-}
-.help-btn:hover { border-color: var(--accent); color: var(--accent); }
-.guide-overlay {
-  display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5);
-  z-index: 100; align-items: center; justify-content: center;
-}
-.guide-overlay.open { display: flex; }
-.guide-panel {
-  background: var(--bg-card); border: 1px solid var(--border);
-  border-radius: 12px; padding: 28px 32px; max-width: 540px; width: 90%;
-  max-height: 80vh; overflow-y: auto; position: relative;
-}
-.guide-panel h2 { font-size: 18px; font-weight: 600; margin-bottom: 16px; }
-.guide-panel h3 { font-size: 13px; font-weight: 600; color: var(--accent); margin: 16px 0 6px; text-transform: uppercase; letter-spacing: 0.5px; }
-.guide-panel p { font-size: 13px; color: var(--text-muted); line-height: 1.7; margin-bottom: 6px; }
-.guide-panel code { background: var(--bg); padding: 2px 6px; border-radius: 4px; font-size: 12px; font-family: var(--font-mono); color: var(--text); }
-.guide-panel .close-btn {
-  position: absolute; top: 16px; right: 16px; background: none; border: none;
-  color: var(--text-dim); font-size: 20px; cursor: pointer; line-height: 1;
-}
-.guide-panel .close-btn:hover { color: var(--text); }
-.guide-panel .shortcut-row {
-  display: flex; gap: 12px; align-items: center; padding: 4px 0;
-  font-size: 13px;
-}
-.guide-panel .shortcut-row .key {
-  background: var(--bg); border: 1px solid var(--border);
-  padding: 2px 8px; border-radius: 4px; font-family: var(--font-mono);
-  font-size: 11px; color: var(--text-muted); min-width: 80px; text-align: center;
-}
-
-/* Clear filters button */
-.clear-btn {
-  background: none; border: 1px solid var(--border);
-  color: var(--text-muted); padding: 7px 14px; border-radius: var(--radius);
-  font-size: 13px; cursor: pointer; transition: border-color 0.15s, color 0.15s;
-  display: none; align-items: center; gap: 5px;
-}
-.clear-btn:hover { border-color: var(--accent); color: var(--accent); }
-.clear-btn.visible { display: flex; }
-
-/* Badges */
-.badge {
-  display: inline-block; padding: 2px 7px; border-radius: 4px;
-  font-size: 11px; font-weight: 500; font-family: var(--font-mono);
-}
-.badge-ok { background: var(--green-dim); color: var(--green); }
-.badge-error { background: var(--red-dim); color: var(--red); }
-.badge-tag { background: rgba(108, 140, 255, 0.1); color: var(--accent); margin-right: 3px; }
-.badge-llm { background: rgba(96, 165, 250, 0.12); color: var(--blue); }
-.badge-tool { background: rgba(167, 139, 250, 0.12); color: var(--purple); }
-.badge-function { background: rgba(45, 212, 191, 0.12); color: var(--teal); }
-.badge-kind { background: rgba(251, 191, 36, 0.12); color: var(--yellow); }
-
-/* Tokens inline */
-.tok { font-family: var(--font-mono); font-size: 12px; }
-.tok .in { color: var(--blue); }
-.tok .out { color: var(--orange); }
-
-/* Empty state */
-.empty-state {
-  display: flex; flex-direction: column; align-items: center;
-  justify-content: center; color: var(--text-dim);
-  gap: 8px; padding: 48px;
-}
-.empty-state .msg { font-size: 14px; }
-
-/* ===== TRACE DETAIL VIEW ===== */
-#trace-detail { display: none; height: 100%; }
-#trace-detail.active { display: flex; flex-direction: column; }
-
-.summary-bar {
-  display: flex; gap: 24px; padding: 14px 24px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-card); flex-shrink: 0; flex-wrap: wrap;
-}
-.summary-stat { display: flex; flex-direction: column; gap: 2px; }
-.summary-stat .label {
-  font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
-  color: var(--text-dim); font-weight: 600;
-}
-.summary-stat .value {
-  font-size: 15px; font-weight: 600; font-family: var(--font-mono);
-}
-
-.detail-panels { display: flex; flex: 1; overflow: hidden; }
-.span-tree-panel {
-  width: 420px; min-width: 320px; max-width: 50%;
-  border-right: 1px solid var(--border); overflow-y: auto; flex-shrink: 0;
-}
-.span-detail-panel { flex: 1; overflow-y: auto; padding: 20px 24px; }
-
-/* Span tree */
-.span-tree { padding: 8px 0; }
-.span-node {
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 12px 6px calc(12px + var(--depth, 0) * 20px);
-  cursor: pointer; transition: background 0.1s;
-  border-left: 3px solid transparent;
-}
-.span-node:hover { background: var(--bg-hover); }
-.span-node.selected { background: var(--bg-selected); border-left-color: var(--accent); }
-.span-node.error { border-left-color: var(--red); }
-.span-node .name {
-  font-size: 13px; font-weight: 500;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.span-node .duration {
-  font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);
-  margin-left: auto; white-space: nowrap;
-}
-.span-node .status-dot {
-  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
-}
-.span-node .status-dot.ok { background: var(--green); }
-.span-node .status-dot.error { background: var(--red); }
-
-.waterfall-container { width: 80px; flex-shrink: 0; position: relative; height: 14px; }
-.waterfall-bg {
-  position: absolute; top: 6px; left: 0; right: 0; height: 2px;
-  background: var(--border); border-radius: 1px;
-}
-.waterfall-bar {
-  position: absolute; top: 3px; height: 8px;
-  background: var(--accent); border-radius: 2px; min-width: 3px; opacity: 0.7;
-}
-.span-node.error .waterfall-bar { background: var(--red); }
-.span-node .waterfall-bar[data-kind="llm"] { background: var(--blue); }
-.span-node .waterfall-bar[data-kind="tool"] { background: var(--purple); }
-.span-node .waterfall-bar[data-kind="function"] { background: var(--teal); }
-
-/* Detail panel */
-.detail-header {
-  display: flex; align-items: center; gap: 12px;
-  margin-bottom: 20px; flex-wrap: wrap;
-}
-.detail-header .name { font-size: 18px; font-weight: 600; }
-.detail-header .duration { font-family: var(--font-mono); font-size: 14px; color: var(--text-muted); }
-
-.detail-section { margin-bottom: 20px; }
-.detail-section .section-header {
-  font-size: 11px; font-weight: 600; text-transform: uppercase;
-  letter-spacing: 0.5px; color: var(--text-dim); margin-bottom: 8px;
-  cursor: pointer; display: flex; align-items: center; gap: 6px; user-select: none;
-}
-.detail-section .section-header .toggle { font-size: 10px; transition: transform 0.15s; }
-.detail-section .section-header .toggle.collapsed { transform: rotate(-90deg); }
-
-.json-viewer {
-  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 12px 16px; font-family: var(--font-mono); font-size: 12px;
-  line-height: 1.6; overflow-x: auto; white-space: pre-wrap;
-  word-break: break-word; max-height: 400px; overflow-y: auto;
-}
-.json-key { color: var(--accent); }
-.json-string { color: var(--green); }
-.json-number { color: var(--orange); }
-.json-bool { color: var(--purple); }
-.json-null { color: var(--text-dim); }
-
-.error-box {
-  background: var(--red-dim); border: 1px solid rgba(248, 113, 113, 0.25);
-  border-radius: var(--radius); padding: 12px 16px;
-}
-.error-box .error-type { font-weight: 600; color: var(--red); font-size: 13px; }
-.error-box .error-msg { color: var(--text); font-size: 13px; margin-top: 4px; font-family: var(--font-mono); }
-
-.token-bar {
-  display: flex; gap: 0; height: 8px; border-radius: 4px;
-  overflow: hidden; background: var(--border); margin-top: 6px;
-}
-.token-bar .input-bar { background: var(--blue); }
-.token-bar .output-bar { background: var(--orange); }
-
-.meta-table { width: 100%; border-collapse: collapse; }
-.meta-table td {
-  padding: 4px 8px; font-size: 12px; border-bottom: 1px solid var(--border);
-  font-family: var(--font-mono);
-}
-.meta-table td:first-child { color: var(--text-muted); white-space: nowrap; width: 120px; }
-
-.tags-row { display: flex; gap: 6px; flex-wrap: wrap; }
-
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
-
-@media (max-width: 900px) {
-  .detail-panels { flex-direction: column; }
-  .span-tree-panel { width: 100%; max-width: 100%; border-right: none; border-bottom: 1px solid var(--border); max-height: 40vh; }
-  .row-meta { display: none; }
-}
-</style>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div id="app">
   <header>
-    <span class="logo">traqo</span>
+    <span class="logo" data-action="go-root">traqo</span>
+    <button class="back-btn" id="back-btn" data-action="go-back" title="Back to traces">&larr;</button>
     <nav class="breadcrumb" id="breadcrumb"></nav>
-    <button class="help-btn" onclick="toggleGuide()" title="How to use traqo">?</button>
+    <button class="help-btn" data-action="toggle-guide" title="Help (?)">?</button>
   </header>
 
-  <!-- Guide overlay -->
-  <div class="guide-overlay" id="guide-overlay" onclick="if(event.target===this)toggleGuide()">
+  <div class="guide-overlay" id="guide-overlay">
     <div class="guide-panel">
-      <button class="close-btn" onclick="toggleGuide()">&times;</button>
+      <button class="close-btn" data-action="toggle-guide">&times;</button>
       <h2>Welcome to traqo</h2>
       <p>traqo records what your LLM application does — every API call, tool use, and decision — as structured trace files.</p>
 
@@ -378,13 +26,12 @@ main { flex: 1; overflow: auto; }
       <p><strong>Traces</strong> are individual runs of your application. Click one to see every step it took.</p>
 
       <h3>Inside a trace</h3>
-      <p>The left panel shows the <strong>span tree</strong> — a timeline of operations your app performed. Each span is one step: an LLM call, an LLM tool invocation, or a Python function.</p>
+      <p>The left panel shows the <strong>span tree</strong> — a timeline of operations your app performed. Each span is one step (an LLM call, a tool invocation, etc).</p>
       <p>Click any span to see its <strong>input</strong>, <strong>output</strong>, <strong>token usage</strong>, and <strong>timing</strong> in the right panel.</p>
 
       <h3>What the colors mean</h3>
-      <div class="shortcut-row"><span class="key" style="color:var(--blue)">llm</span> <span>LLM / model API call (OpenAI, Anthropic, etc.)</span></div>
-      <div class="shortcut-row"><span class="key" style="color:var(--purple)">tool</span> <span>LLM tool use — a function the model invoked</span></div>
-      <div class="shortcut-row"><span class="key" style="color:var(--teal)">function</span> <span>Regular Python function execution</span></div>
+      <div class="shortcut-row"><span class="key" style="color:var(--blue)">llm</span> <span>LLM / model call</span></div>
+      <div class="shortcut-row"><span class="key" style="color:var(--purple)">tool</span> <span>Tool or function call</span></div>
       <div class="shortcut-row"><span class="key" style="color:var(--green)">ok</span> <span>Completed successfully</span></div>
       <div class="shortcut-row"><span class="key" style="color:var(--red)">error</span> <span>Something went wrong</span></div>
 
@@ -393,26 +40,49 @@ main { flex: 1; overflow: auto; }
       <div class="shortcut-row"><span class="key">spans</span> <span>Number of operations in a trace</span></div>
       <div class="shortcut-row"><span class="key">duration</span> <span>Wall-clock time</span></div>
 
+      <h3>Keyboard shortcuts</h3>
+      <div class="shortcut-row"><span class="key">Esc</span> <span>Go back / close dialog</span></div>
+      <div class="shortcut-row"><span class="key">?</span> <span>Toggle this help guide</span></div>
+      <div class="shortcut-row"><span class="key">&uarr; / &darr;</span> <span>Navigate spans in trace view</span></div>
+      <div class="shortcut-row"><span class="key">r</span> <span>Refresh trace list</span></div>
+
       <h3>Tips</h3>
       <p>Use <strong>Search</strong> to filter by name, tags, or thread ID. Use <strong>Status</strong> to show only errors.</p>
       <p>Organize traces into folders by choosing your file path: <code>Tracer(Path("traces/my-agent/run.jsonl"))</code></p>
     </div>
   </div>
+
+  <div class="error-banner" id="error-banner">
+    <span id="error-msg"></span>
+    <button data-action="dismiss-error">&times;</button>
+  </div>
+
   <main>
+    <div class="loading-overlay" id="loading"><div class="spinner"></div></div>
+
     <div id="browse-view">
+      <div class="folder-header" id="folder-header"></div>
       <div class="summary-strip" id="summary-strip"></div>
       <div class="filter-bar">
         <input type="text" id="search-input" placeholder="Search by name, tag, thread ID...">
-        <select id="status-filter">
-          <option value="all">All statuses</option>
-          <option value="ok">OK only</option>
-          <option value="error">Errors only</option>
-        </select>
-        <button class="clear-btn" id="clear-filters" onclick="clearFilters()">&times; Clear filters</button>
+        <div class="dropdown" id="status-dropdown">
+          <button class="dropdown-toggle" data-action="toggle-dropdown" data-dropdown="status-dropdown">All statuses <span class="caret">&#9662;</span></button>
+          <div class="dropdown-menu">
+            <div class="dropdown-item selected" data-action="select-status" data-value="all"><span class="check">&#10003;</span>All statuses</div>
+            <div class="dropdown-item" data-action="select-status" data-value="ok"><span class="check"></span>OK only</div>
+            <div class="dropdown-item" data-action="select-status" data-value="error"><span class="check"></span>Errors only</div>
+          </div>
+        </div>
+        <div class="dropdown" id="tag-dropdown">
+          <button class="dropdown-toggle" data-action="toggle-dropdown" data-dropdown="tag-dropdown">All tags <span class="caret">&#9662;</span></button>
+          <div class="dropdown-menu" id="tag-menu"></div>
+        </div>
+        <button class="clear-btn" id="clear-filters" data-action="clear-filters">&times; Clear</button>
       </div>
+      <div class="filter-info" id="filter-info"></div>
       <div class="item-list" id="item-list"></div>
       <div class="empty-state" id="empty-list" style="display:none">
-        <div class="msg">No traces found in this directory</div>
+        <div class="msg">No traces found</div>
       </div>
     </div>
 
@@ -428,495 +98,11 @@ main { flex: 1; overflow: auto; }
       </div>
     </div>
   </main>
+  <footer style="flex-shrink:0;padding:8px 24px;border-top:1px solid var(--border);text-align:center;font-size:12px;color:var(--text-dim);">
+    Made with &hearts; &middot; <a href="https://github.com/Cecuro/traqo" target="_blank" rel="noopener" style="color:var(--text-muted);text-decoration:none;">GitHub</a>
+  </footer>
 </div>
 
-<script>
-const FOLDER_SVG = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 3.5A1.5 1.5 0 012.5 2h3.172a1.5 1.5 0 011.06.44l.658.658a.5.5 0 00.354.147H13.5A1.5 1.5 0 0115 4.75v7.75A1.5 1.5 0 0113.5 14h-11A1.5 1.5 0 011 12.5v-9z"/></svg>';
-const TRACE_SVG = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M2 3.5A1.5 1.5 0 013.5 2h5.672a1.5 1.5 0 011.06.44l2.829 2.828a1.5 1.5 0 01.439 1.06V12.5A1.5 1.5 0 0112 14H3.5A1.5 1.5 0 012 12.5v-9zM3.5 3a.5.5 0 00-.5.5v9a.5.5 0 00.5.5H12a.5.5 0 00.5-.5V6.328a.5.5 0 00-.146-.353L9.525 3.146A.5.5 0 009.172 3H3.5z"/></svg>';
-
-// ===== STATE =====
-let allTraces = [];
-let currentDir = '';
-let currentTrace = null;
-let currentEvents = [];
-let selectedSpanId = null;
-let sortCol = 'ts';
-let sortAsc = false;
-
-// ===== API =====
-async function fetchTraces() {
-  const res = await fetch('/api/traces');
-  allTraces = await res.json();
-  navigateTo('');
-}
-
-async function fetchTrace(file) {
-  const res = await fetch(`/api/trace?file=${encodeURIComponent(file)}`);
-  const data = await res.json();
-  currentEvents = data.events || [];
-  currentTrace = file;
-  showTraceDetail();
-}
-
-// ===== DIRECTORY LOGIC =====
-function tracesUnder(dirPrefix) {
-  if (!dirPrefix) return allTraces;
-  return allTraces.filter(t => t.file.startsWith(dirPrefix + '/'));
-}
-
-function itemsAtDir(dirPrefix, traces) {
-  const dirs = new Map();
-  const directTraces = [];
-  const prefix = dirPrefix ? dirPrefix + '/' : '';
-
-  for (const t of traces) {
-    const rel = dirPrefix ? t.file.slice(prefix.length) : t.file;
-    const slashIdx = rel.indexOf('/');
-    if (slashIdx === -1) {
-      directTraces.push(t);
-    } else {
-      const dirName = rel.slice(0, slashIdx);
-      const dirPath = prefix + dirName;
-      if (!dirs.has(dirName)) dirs.set(dirName, dirPath);
-    }
-  }
-
-  const dirList = [];
-  for (const [name, path] of dirs) {
-    const sub = tracesUnder(path);
-    const agg = aggregateStats(sub);
-    let latestTs = '';
-    for (const t of sub) {
-      if (t.ts && t.ts > latestTs) latestTs = t.ts;
-    }
-    dirList.push({ type: 'folder', name, path, latestTs, ...agg });
-  }
-  dirList.sort((a, b) => a.name.localeCompare(b.name));
-
-  return { dirs: dirList, traces: directTraces };
-}
-
-function aggregateStats(traces) {
-  let totalSpans = 0, totalErrors = 0, totalIn = 0, totalOut = 0, totalDuration = 0;
-  for (const t of traces) {
-    const s = t.stats || {};
-    totalSpans += s.spans || 0;
-    totalErrors += s.errors || 0;
-    totalIn += s.total_input_tokens || 0;
-    totalOut += s.total_output_tokens || 0;
-    totalDuration += t.duration_s || 0;
-  }
-  return {
-    traceCount: traces.length, totalSpans, totalErrors, totalIn, totalOut, totalDuration,
-    avgDuration: traces.length ? totalDuration / traces.length : 0,
-  };
-}
-
-function navigateTo(dirPath) {
-  currentDir = dirPath;
-  currentTrace = null;
-  currentEvents = [];
-  document.getElementById('browse-view').style.display = 'block';
-  document.getElementById('trace-detail').style.display = 'none';
-  document.getElementById('trace-detail').classList.remove('active');
-  renderBreadcrumb();
-  renderBrowseView();
-}
-
-// ===== BREADCRUMB =====
-function renderBreadcrumb() {
-  const bc = document.getElementById('breadcrumb');
-  let html = `<a onclick="navigateTo('')">traces</a>`;
-  if (currentDir) {
-    const parts = currentDir.split('/');
-    let path = '';
-    for (let i = 0; i < parts.length; i++) {
-      path += (i > 0 ? '/' : '') + parts[i];
-      const p = path;
-      html += `<span class="sep">/</span>`;
-      if (i === parts.length - 1 && !currentTrace) {
-        html += `<span class="current">${esc(parts[i])}</span>`;
-      } else {
-        html += `<a onclick="navigateTo('${esc(p)}')">${esc(parts[i])}</a>`;
-      }
-    }
-  }
-  if (currentTrace) {
-    const fileName = currentTrace.split('/').pop();
-    html += `<span class="sep">/</span><span class="current">${esc(fileName)}</span>`;
-  }
-  bc.innerHTML = html;
-}
-
-// ===== BROWSE VIEW =====
-function renderBrowseView() {
-  const search = document.getElementById('search-input').value.toLowerCase();
-  const statusFilter = document.getElementById('status-filter').value;
-
-  let scopedTraces = currentDir ? tracesUnder(currentDir) : [...allTraces];
-
-  // Filter
-  let filteredScoped = scopedTraces.filter(t => {
-    if (search) {
-      const haystack = [t.file, t.thread_id || '', ...(t.tags || []), JSON.stringify(t.input || '')].join(' ').toLowerCase();
-      if (!haystack.includes(search)) return false;
-    }
-    if (statusFilter === 'ok' && (t.stats?.errors || 0) > 0) return false;
-    if (statusFilter === 'error' && (t.stats?.errors || 0) === 0) return false;
-    return true;
-  });
-
-  const items = itemsAtDir(currentDir, filteredScoped);
-
-  // Summary strip (unfiltered scope)
-  const agg = aggregateStats(scopedTraces);
-  renderSummaryStrip(agg);
-
-  // Build unified list: folders first, then traces sorted
-  const traces = [...items.traces];
-  traces.sort((a, b) => {
-    let va = getSortValue(a, sortCol), vb = getSortValue(b, sortCol);
-    if (va < vb) return sortAsc ? -1 : 1;
-    if (va > vb) return sortAsc ? 1 : -1;
-    return 0;
-  });
-
-  const listEl = document.getElementById('item-list');
-  const emptyEl = document.getElementById('empty-list');
-
-  if (items.dirs.length === 0 && traces.length === 0) {
-    listEl.style.display = 'none';
-    emptyEl.style.display = 'flex';
-    return;
-  }
-  listEl.style.display = 'block';
-  emptyEl.style.display = 'none';
-
-  let html = '';
-
-  // Folder rows
-  for (const d of items.dirs) {
-    const hasErrors = d.totalErrors > 0;
-    html += `<div class="item-row" onclick="navigateTo('${esc(d.path)}')">
-      <div class="row-icon folder">${FOLDER_SVG}</div>
-      <div class="row-main">
-        <div class="row-name">${esc(d.name)}</div>
-        <div class="row-desc">${d.traceCount} trace${d.traceCount !== 1 ? 's' : ''}${d.latestTs ? ' &middot; latest ' + fmtTime(d.latestTs) : ''}</div>
-      </div>
-      <div class="row-meta">
-        <div class="row-meta-item">
-          <span class="val tok"><span class="in">${fmtN(d.totalIn)}</span> / <span class="out">${fmtN(d.totalOut)}</span></span>
-          <span class="lbl">tokens</span>
-        </div>
-        <div class="row-meta-item">
-          <span class="val">${fmtDur(d.avgDuration)}</span>
-          <span class="lbl">avg</span>
-        </div>
-        ${hasErrors
-          ? `<div class="row-meta-item"><span class="val" style="color:var(--red)">${d.totalErrors}</span><span class="lbl">errors</span></div>`
-          : `<div class="row-meta-item"><span class="badge badge-ok">ok</span></div>`
-        }
-      </div>
-      <div class="row-chevron">&rsaquo;</div>
-    </div>`;
-  }
-
-  // Trace rows
-  for (const t of traces) {
-    const stats = t.stats || {};
-    const hasErrors = (stats.errors || 0) > 0;
-    const inTok = stats.total_input_tokens || 0;
-    const outTok = stats.total_output_tokens || 0;
-    const displayName = t.file.split('/').pop().replace(/\.jsonl$/, '');
-    const desc = summarizeInput(t.input);
-
-    html += `<div class="item-row" onclick="fetchTrace('${esc(t.file)}')">
-      <div class="row-icon ${hasErrors ? 'trace-error' : 'trace'}">${TRACE_SVG}</div>
-      <div class="row-main">
-        <div class="row-name">${esc(displayName)}</div>
-        <div class="row-desc">${esc(desc)}${t.tags?.length ? ' &middot; ' + t.tags.slice(0, 3).map(x => `<span class="badge badge-tag">${esc(x)}</span>`).join('') : ''}</div>
-      </div>
-      <div class="row-meta">
-        <div class="row-meta-item">
-          <span class="val tok"><span class="in">${fmtN(inTok)}</span> / <span class="out">${fmtN(outTok)}</span></span>
-          <span class="lbl">tokens</span>
-        </div>
-        <div class="row-meta-item">
-          <span class="val">${fmtDur(t.duration_s)}</span>
-          <span class="lbl">duration</span>
-        </div>
-        <div class="row-meta-item">
-          <span class="val">${stats.spans || 0}</span>
-          <span class="lbl">spans</span>
-        </div>
-        <div class="row-meta-item">
-          <span class="val">${fmtTime(t.ts)}</span>
-          <span class="lbl">time</span>
-        </div>
-        <div class="row-meta-item">
-          ${hasErrors
-            ? `<span class="badge badge-error">${stats.errors} error${stats.errors !== 1 ? 's' : ''}</span>`
-            : `<span class="badge badge-ok">ok</span>`
-          }
-        </div>
-      </div>
-      <div class="row-chevron">&rsaquo;</div>
-    </div>`;
-  }
-
-  listEl.innerHTML = html;
-}
-
-function renderSummaryStrip(agg) {
-  document.getElementById('summary-strip').innerHTML = `
-    <div class="stat"><span class="val">${agg.traceCount}</span> <span class="lbl">traces</span></div>
-    <div class="stat"><span class="val" style="color:var(--blue)">${fmtN(agg.totalIn)}</span> <span class="lbl">in</span></div>
-    <div class="stat"><span class="val" style="color:var(--orange)">${fmtN(agg.totalOut)}</span> <span class="lbl">out</span></div>
-    <div class="stat"><span class="val">${fmtDur(agg.avgDuration)}</span> <span class="lbl">avg</span></div>
-    <div class="stat"><span class="val" style="color:${agg.totalErrors > 0 ? 'var(--red)' : 'var(--text)'}">${agg.totalErrors}</span> <span class="lbl">errors</span></div>
-  `;
-}
-
-function getSortValue(t, col) {
-  switch (col) {
-    case 'file': return t.file.split('/').pop() || '';
-    case 'ts': return t.ts || '';
-    case 'duration_s': return t.duration_s || 0;
-    case 'spans': return t.stats?.spans || 0;
-    case 'tokens': return (t.stats?.total_input_tokens || 0) + (t.stats?.total_output_tokens || 0);
-    case 'errors': return t.stats?.errors || 0;
-    default: return '';
-  }
-}
-
-// Filter handlers
-document.getElementById('search-input').addEventListener('input', () => { updateClearBtn(); renderBrowseView(); });
-document.getElementById('status-filter').addEventListener('change', () => { updateClearBtn(); renderBrowseView(); });
-
-function clearFilters() {
-  document.getElementById('search-input').value = '';
-  document.getElementById('status-filter').value = 'all';
-  updateClearBtn();
-  renderBrowseView();
-}
-function updateClearBtn() {
-  const hasFilters = document.getElementById('search-input').value || document.getElementById('status-filter').value !== 'all';
-  document.getElementById('clear-filters').classList.toggle('visible', hasFilters);
-}
-
-// Guide
-function toggleGuide() {
-  document.getElementById('guide-overlay').classList.toggle('open');
-}
-
-// ===== TRACE DETAIL =====
-function showTraceDetail() {
-  document.getElementById('browse-view').style.display = 'none';
-  const detail = document.getElementById('trace-detail');
-  detail.style.display = 'flex';
-  detail.classList.add('active');
-
-  const parts = currentTrace.split('/');
-  if (parts.length > 1) currentDir = parts.slice(0, -1).join('/');
-  renderBreadcrumb();
-
-  const traceStart = currentEvents.find(e => e.type === 'trace_start') || {};
-  const traceEnd = currentEvents.find(e => e.type === 'trace_end') || {};
-  const stats = traceEnd.stats || {};
-  const inTok = stats.total_input_tokens || 0;
-  const outTok = stats.total_output_tokens || 0;
-
-  document.getElementById('summary-bar').innerHTML = `
-    <div class="summary-stat"><span class="label">Duration</span><span class="value">${fmtDur(traceEnd.duration_s)}</span></div>
-    <div class="summary-stat"><span class="label">Spans</span><span class="value">${stats.spans || 0}</span></div>
-    <div class="summary-stat"><span class="label">Input tokens</span><span class="value" style="color:var(--blue)">${fmtN(inTok)}</span></div>
-    <div class="summary-stat"><span class="label">Output tokens</span><span class="value" style="color:var(--orange)">${fmtN(outTok)}</span></div>
-    <div class="summary-stat"><span class="label">Events</span><span class="value">${stats.events || 0}</span></div>
-    <div class="summary-stat"><span class="label">Errors</span><span class="value" style="color:${(stats.errors||0)>0?'var(--red)':'var(--text)'}">${stats.errors || 0}</span></div>
-    ${traceStart.tags?.length ? `<div class="summary-stat"><span class="label">Tags</span><span class="value">${traceStart.tags.map(t=>`<span class="badge badge-tag">${esc(t)}</span>`).join(' ')}</span></div>` : ''}
-    ${traceStart.thread_id ? `<div class="summary-stat"><span class="label">Thread</span><span class="value" style="font-size:13px">${esc(traceStart.thread_id)}</span></div>` : ''}
-  `;
-
-  renderSpanTree();
-  selectedSpanId = null;
-  document.getElementById('span-detail').innerHTML = '<div class="empty-state"><div class="msg">Select a span to view details</div></div>';
-}
-
-// ===== SPAN TREE =====
-function renderSpanTree() {
-  const spanEnds = new Map(), spanStarts = new Map(), logEvents = [];
-  const traceStart = currentEvents.find(e => e.type === 'trace_start');
-  const traceEnd = currentEvents.find(e => e.type === 'trace_end');
-
-  for (const ev of currentEvents) {
-    if (ev.type === 'span_end') spanEnds.set(ev.id, ev);
-    if (ev.type === 'span_start') spanStarts.set(ev.id, ev);
-    if (ev.type === 'event') logEvents.push(ev);
-  }
-
-  const spans = [];
-  for (const [id, end] of spanEnds) {
-    const start = spanStarts.get(id) || {};
-    spans.push({ id, parent_id: end.parent_id, name: end.name, kind: end.kind || start.kind,
-      status: end.status, duration_s: end.duration_s, input: start.input, output: end.output,
-      metadata: end.metadata || start.metadata, tags: end.tags || start.tags || [],
-      error: end.error, ts_start: start.ts, ts_end: end.ts });
-  }
-
-  const t0 = traceStart?.ts ? new Date(traceStart.ts).getTime() : 0;
-  const t1 = traceEnd?.ts ? new Date(traceEnd.ts).getTime() : 0;
-  const dur = t1 - t0 || 1;
-
-  const roots = [], childMap = new Map();
-  for (const s of spans) {
-    if (!s.parent_id) roots.push(s);
-    else { if (!childMap.has(s.parent_id)) childMap.set(s.parent_id, []); childMap.get(s.parent_id).push(s); }
-  }
-  for (const c of childMap.values()) c.sort((a,b) => (a.ts_start||'') < (b.ts_start||'') ? -1 : 1);
-  roots.sort((a,b) => (a.ts_start||'') < (b.ts_start||'') ? -1 : 1);
-
-  function renderNode(span, depth) {
-    const s0 = span.ts_start ? new Date(span.ts_start).getTime() : t0;
-    const s1 = span.ts_end ? new Date(span.ts_end).getTime() : s0;
-    const left = ((s0 - t0) / dur * 100).toFixed(1);
-    const width = Math.max(((s1 - s0) / dur * 100), 1).toFixed(1);
-    let h = `<div class="span-node ${span.status==='error'?'error':''}" style="--depth:${depth}" data-span-id="${span.id}" onclick="selectSpan('${span.id}')">
-      <span class="status-dot ${span.status||'ok'}"></span>
-      ${span.kind ? `<span class="badge badge-${span.kind==='llm'?'llm':span.kind==='tool'?'tool':span.kind==='function'?'function':'kind'}">${esc(span.kind)}</span>` : ''}
-      <span class="name">${esc(span.name)}</span>
-      <div class="waterfall-container"><div class="waterfall-bg"></div><div class="waterfall-bar" data-kind="${span.kind||''}" style="left:${left}%;width:${width}%"></div></div>
-      <span class="duration">${fmtDur(span.duration_s)}</span>
-    </div>`;
-    for (const child of (childMap.get(span.id) || [])) h += renderNode(child, depth + 1);
-    return h;
-  }
-
-  let html = '';
-  if (traceStart?.input || traceEnd?.output) {
-    html += `<div class="span-node" style="--depth:0;opacity:0.7" data-span-id="__trace__" onclick="selectTraceIO()">
-      <span class="status-dot ok"></span><span class="badge badge-kind">trace</span>
-      <span class="name">Trace I/O</span><span class="duration">${fmtDur(traceEnd?.duration_s)}</span></div>`;
-  }
-  for (const root of roots) html += renderNode(root, 0);
-  for (const ev of logEvents) {
-    html += `<div class="span-node" style="--depth:0;opacity:0.6" data-span-id="ev-${ev.id}" onclick="selectEvent('${ev.id}')">
-      <span class="status-dot ok" style="background:var(--yellow)"></span><span class="badge badge-kind">event</span>
-      <span class="name">${esc(ev.name)}</span></div>`;
-  }
-  document.getElementById('span-tree').innerHTML = html || '<div class="empty-state"><div class="msg">No spans</div></div>';
-}
-
-// ===== SPAN DETAIL =====
-function selectSpan(spanId) {
-  selectedSpanId = spanId;
-  document.querySelectorAll('.span-node').forEach(n => n.classList.toggle('selected', n.dataset.spanId === spanId));
-  const end = currentEvents.find(e => e.type === 'span_end' && e.id === spanId);
-  const start = currentEvents.find(e => e.type === 'span_start' && e.id === spanId);
-  if (!end && !start) return;
-  const span = { id: spanId, name: end?.name||start?.name, kind: end?.kind||start?.kind,
-    status: end?.status, duration_s: end?.duration_s, input: start?.input, output: end?.output,
-    metadata: end?.metadata||start?.metadata, tags: end?.tags||start?.tags||[],
-    error: end?.error, ts_start: start?.ts, ts_end: end?.ts };
-
-  let h = `<div class="detail-header">
-    <span class="name">${esc(span.name)}</span>
-    ${span.kind?`<span class="badge badge-${span.kind==='llm'?'llm':span.kind==='tool'?'tool':span.kind==='function'?'function':'kind'}">${esc(span.kind)}</span>`:''}
-    <span class="badge ${span.status==='error'?'badge-error':'badge-ok'}">${span.status||'ok'}</span>
-    <span class="duration">${fmtDur(span.duration_s)}</span></div>`;
-
-  if (span.ts_start || span.ts_end) {
-    h += `<div class="detail-section"><div class="section-header">Timing</div><table class="meta-table">
-      ${span.ts_start?`<tr><td>Start</td><td>${fmtTimeFull(span.ts_start)}</td></tr>`:''}
-      ${span.ts_end?`<tr><td>End</td><td>${fmtTimeFull(span.ts_end)}</td></tr>`:''}
-      ${span.duration_s!=null?`<tr><td>Duration</td><td>${span.duration_s.toFixed(3)}s</td></tr>`:''}
-    </table></div>`;
-  }
-  if (span.tags.length) h += `<div class="detail-section"><div class="section-header">Tags</div><div class="tags-row">${span.tags.map(t=>`<span class="badge badge-tag">${esc(t)}</span>`).join('')}</div></div>`;
-  if (span.error) h += `<div class="detail-section"><div class="section-header">Error</div><div class="error-box"><div class="error-type">${esc(span.error.type||'Error')}</div><div class="error-msg">${esc(span.error.message||'')}</div></div></div>`;
-  if (span.metadata?.token_usage) {
-    const tu = span.metadata.token_usage, it = tu.input_tokens||0, ot = tu.output_tokens||0, tot = it+ot||1;
-    h += `<div class="detail-section"><div class="section-header">Token Usage</div>
-      <div class="tok" style="margin-bottom:6px"><span class="in">${fmtN(it)} input</span> / <span class="out">${fmtN(ot)} output</span></div>
-      <div class="token-bar"><div class="input-bar" style="width:${(it/tot*100).toFixed(1)}%"></div><div class="output-bar" style="width:${(ot/tot*100).toFixed(1)}%"></div></div>
-      ${tu.reasoning_tokens?`<div style="margin-top:4px;font-size:12px;color:var(--text-muted)">Reasoning: ${fmtN(tu.reasoning_tokens)}</div>`:''}
-      ${tu.cache_read_tokens?`<div style="margin-top:2px;font-size:12px;color:var(--text-muted)">Cache read: ${fmtN(tu.cache_read_tokens)}</div>`:''}</div>`;
-  }
-  if (span.input != null) h += colSec('Input', renderJson(span.input));
-  if (span.output != null) h += colSec('Output', renderJson(span.output));
-  if (span.metadata && Object.keys(span.metadata).length) {
-    const m = {...span.metadata}; delete m.token_usage;
-    if (Object.keys(m).length) h += colSec('Metadata', renderJson(m));
-  }
-  document.getElementById('span-detail').innerHTML = h;
-}
-
-function selectTraceIO() {
-  selectedSpanId = '__trace__';
-  document.querySelectorAll('.span-node').forEach(n => n.classList.toggle('selected', n.dataset.spanId === '__trace__'));
-  const ts = currentEvents.find(e => e.type === 'trace_start') || {};
-  const te = currentEvents.find(e => e.type === 'trace_end') || {};
-  let h = '<div class="detail-header"><span class="name">Trace I/O</span><span class="badge badge-kind">trace</span></div>';
-  if (ts.input != null) h += colSec('Trace Input', renderJson(ts.input));
-  if (te.output != null) h += colSec('Trace Output', renderJson(te.output));
-  if (ts.metadata && Object.keys(ts.metadata).length) h += colSec('Trace Metadata', renderJson(ts.metadata));
-  document.getElementById('span-detail').innerHTML = h;
-}
-
-function selectEvent(evId) {
-  const ev = currentEvents.find(e => e.type === 'event' && e.id === evId);
-  if (!ev) return;
-  document.querySelectorAll('.span-node').forEach(n => n.classList.toggle('selected', n.dataset.spanId === `ev-${evId}`));
-  let h = `<div class="detail-header"><span class="name">${esc(ev.name)}</span><span class="badge badge-kind">event</span></div>`;
-  if (ev.ts) h += `<div class="detail-section"><div class="section-header">Timestamp</div><div style="font-family:var(--font-mono);font-size:13px">${fmtTimeFull(ev.ts)}</div></div>`;
-  if (ev.data != null) h += colSec('Data', renderJson(ev.data));
-  document.getElementById('span-detail').innerHTML = h;
-}
-
-// ===== HELPERS =====
-function esc(s) { return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
-function fmtDur(s) { if(s==null)return'-'; if(s<0.001)return'<1ms'; if(s<1)return`${(s*1000).toFixed(0)}ms`; if(s<60)return`${s.toFixed(2)}s`; return`${(s/60).toFixed(1)}m`; }
-function fmtTime(ts) { if(!ts)return'-'; const d=new Date(ts); return d.toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); }
-function fmtTimeFull(ts) { if(!ts)return'-'; return new Date(ts).toISOString().replace('T',' ').replace('Z',' UTC'); }
-function fmtN(n) { if(n==null)return'0'; if(n>=1e6)return(n/1e6).toFixed(1)+'M'; if(n>=1e3)return(n/1e3).toFixed(1)+'k'; return String(n); }
-
-function summarizeInput(input) {
-  if (input == null) return '';
-  if (typeof input === 'string') return input.length > 80 ? input.slice(0,80)+'...' : input;
-  if (typeof input === 'object') {
-    for (const key of ['query','question','prompt','message','text','input','city','name','url']) {
-      if (input[key] && typeof input[key] === 'string') { const v = input[key]; return v.length > 80 ? v.slice(0,80)+'...' : v; }
-    }
-    const keys = Object.keys(input);
-    return keys.length ? keys.join(', ') : '';
-  }
-  return String(input).slice(0, 80);
-}
-
-function colSec(title, content, open = true) {
-  const id = 'sec-' + Math.random().toString(36).slice(2,8);
-  return `<div class="detail-section"><div class="section-header" onclick="toggleSec('${id}')"><span class="toggle ${open?'':'collapsed'}" id="toggle-${id}">\u25BC</span>${esc(title)}</div><div id="${id}" style="${open?'':'display:none'}">${content}</div></div>`;
-}
-function toggleSec(id) {
-  const el=document.getElementById(id), tog=document.getElementById('toggle-'+id);
-  if(el.style.display==='none'){el.style.display='';tog.classList.remove('collapsed');}
-  else{el.style.display='none';tog.classList.add('collapsed');}
-}
-function renderJson(value) {
-  if (typeof value==='string') { return value.includes('\n')||value.length>100 ? `<div class="json-viewer">${esc(value)}</div>` : `<div class="json-viewer"><span class="json-string">"${esc(value)}"</span></div>`; }
-  return `<div class="json-viewer">${synHi(value)}</div>`;
-}
-function synHi(obj, ind=0) {
-  if(obj===null)return'<span class="json-null">null</span>';
-  if(typeof obj==='boolean')return`<span class="json-bool">${obj}</span>`;
-  if(typeof obj==='number')return`<span class="json-number">${obj}</span>`;
-  if(typeof obj==='string'){const d=obj.length>500?obj.slice(0,500)+'...':obj;const e=esc(d).replace(/\n/g,'\n'+' '.repeat(ind+2));return`<span class="json-string">"${e}"</span>`;}
-  if(Array.isArray(obj)){if(!obj.length)return'[]';const p=' '.repeat(ind+2),ep=' '.repeat(ind);return'[\n'+obj.map(i=>p+synHi(i,ind+2)).join(',\n')+'\n'+ep+']';}
-  if(typeof obj==='object'){const k=Object.keys(obj);if(!k.length)return'{}';const p=' '.repeat(ind+2),ep=' '.repeat(ind);return'{\n'+k.map(key=>p+`<span class="json-key">"${esc(key)}"</span>: `+synHi(obj[key],ind+2)).join(',\n')+'\n'+ep+'}';}
-  return esc(String(obj));
-}
-
-// ===== INIT =====
-fetchTraces();
-</script>
+<script src="app.js"></script>
 </body>
 </html>

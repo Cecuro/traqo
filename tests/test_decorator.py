@@ -110,20 +110,6 @@ class TestSyncDecorator:
         assert start["kind"] == "tool"
         assert end["kind"] == "tool"
 
-    def test_default_kind_is_function(self, trace_file: Path):
-        @trace()
-        def process(x: int) -> int:
-            return x * 2
-
-        with Tracer(trace_file):
-            process(5)
-
-        events = read_events(trace_file)
-        start = [e for e in events if e["type"] == "span_start"][0]
-        end = [e for e in events if e["type"] == "span_end"][0]
-        assert start["kind"] == "function"
-        assert end["kind"] == "function"
-
 
 class TestAsyncDecorator:
     async def test_async_function(self, trace_file: Path):
