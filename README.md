@@ -7,12 +7,12 @@ from traqo import Tracer, trace
 from pathlib import Path
 
 @trace()
-async def classify(text: str) -> str:
-    response = await llm.chat(text)
+def classify(text: str) -> str:
+    response = llm.chat(text)
     return response
 
 with Tracer(Path("traces/run.jsonl"), input={"query": "Is this a bug?"}):
-    result = await classify("Is this a bug?")
+    result = classify("Is this a bug?")
 ```
 
 Your traces are just `.jsonl` files. Read them with `grep`, query them with DuckDB, or hand them to an AI assistant.
@@ -45,22 +45,24 @@ from traqo import Tracer, trace
 from pathlib import Path
 
 @trace()
-async def summarize(text: str) -> str:
+def summarize(text: str) -> str:
     # your logic here
     return summary
 
 @trace()
-async def pipeline(docs: list[str]) -> list[str]:
-    return [await summarize(doc) for doc in docs]
+def pipeline(docs: list[str]) -> list[str]:
+    return [summarize(doc) for doc in docs]
 
-async with Tracer(
+with Tracer(
     Path("traces/my_run.jsonl"),
     input={"docs": ["doc1", "doc2"]},
     tags=["production"],
 ) as tracer:
-    results = await pipeline(["doc1", "doc2"])
+    results = pipeline(["doc1", "doc2"])
     tracer.set_output({"count": len(results)})
 ```
+
+`@trace()` works with `async def` and `async with` too — it detects and handles both automatically.
 
 ### 2. Auto-trace LLM calls
 
@@ -146,7 +148,7 @@ Features: folder navigation, search/filter, span tree with waterfall timing, JSO
 
 ## API Reference
 
-### `Tracer(path, *, input=None, metadata=None, tags=None, thread_id=None, capture_content=True)`
+### `Tracer(path, *, input=None, metadata=None, tags=None, thread_id=None, capture_content=True, backends=None)`
 
 Creates a trace session writing to a JSONL file. Use as a context manager.
 
@@ -159,7 +161,7 @@ with Tracer(
     thread_id="conv-456",
     capture_content=False,  # Integrations omit LLM input/output
 ) as tracer:
-    result = await my_pipeline()
+    result = my_pipeline()
     tracer.set_output({"response": result})
 ```
 
@@ -170,7 +172,8 @@ with Tracer(
 | `metadata` | `dict` | `{}` | Arbitrary metadata written to `trace_start`. |
 | `tags` | `list[str]` | `[]` | Tags for filtering/categorization, written to `trace_start`. |
 | `thread_id` | `str` | `None` | Conversation/thread grouping ID, written to `trace_start`. |
-| `capture_content` | `bool` | `True` | If `False`, integrations omit LLM inputs/outputs. |
+| `capture_content` | `bool` | `True` | If `False`, integration wrappers (OpenAI, Anthropic, LangChain) omit LLM message inputs/outputs. The `@trace` decorator has separate `capture_input`/`capture_output` flags. |
+| `backends` | `list[Backend]` | `None` | Storage backends notified on events and trace completion. The local JSONL file is always written regardless. |
 
 **Methods:**
 
@@ -264,7 +267,7 @@ For concurrent agents or workers that produce many events. Each child writes to 
 with Tracer(Path("traces/pipeline.jsonl")) as tracer:
     child = tracer.child("reentrancy_agent", Path("traces/agents/reentrancy.jsonl"))
     with child:
-        await run_agent(...)
+        run_agent(...)
 ```
 
 The parent trace records `child_started` / `child_ended` events and includes child summaries in `trace_end`.
