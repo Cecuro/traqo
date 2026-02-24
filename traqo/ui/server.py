@@ -174,6 +174,8 @@ def serve(
 
 
 def main() -> None:
+    from traqo.logging import setup_logging
+
     parser = argparse.ArgumentParser(description="traqo trace viewer")
     parser.add_argument(
         "source",
@@ -182,9 +184,11 @@ def main() -> None:
         help="Trace source: local directory, s3://bucket/prefix, or gs://bucket/prefix",
     )
     parser.add_argument("--port", "-p", type=int, default=7600, help="Port to serve on (default: 7600)")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Show cloud listing and download activity")
     parser.add_argument("--dev", action="store_true", help="Enable hot reload on static file changes")
     parser.add_argument("--static-dir", default=None, help="Override static file directory (for development)")
     args = parser.parse_args()
+    setup_logging(verbose=args.verbose)
     serve(args.source, args.port, dev=args.dev, static_dir=args.static_dir)
 
 

@@ -6,6 +6,7 @@ import os
 
 from traqo._version import __version__
 from traqo.backend import Backend, flush_backends, shutdown_backends
+from traqo.logging import setup_logging
 from traqo.decorator import trace
 from traqo.tracer import (
     AGENT,
@@ -47,6 +48,7 @@ __all__ = [
     "update_current_span",
     "disable",
     "enable",
+    "setup_logging",
     "flush_backends",
     "shutdown_backends",
     "__version__",

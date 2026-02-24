@@ -214,6 +214,7 @@ class S3Source:
 
         # Sort by last_modified descending
         summaries.sort(key=lambda s: s.last_modified or 0, reverse=True)
+        logger.info("listed %d traces from s3://%s/%s", len(summaries), self._bucket, self._prefix)
         return summaries
 
     def read_first_last(self, key: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
@@ -239,7 +240,7 @@ class S3Source:
     def _download(self, key: str, dest: Path) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
         s3_key = f"{self._prefix}{key}"
-        logger.debug("traqo ui: downloading s3://%s/%s", self._bucket, s3_key)
+        logger.info("downloading s3://%s/%s", self._bucket, s3_key)
         self._client.download_file(self._bucket, s3_key, str(dest))
 
 
@@ -293,6 +294,7 @@ class GCSSource:
             summaries.append(summary)
 
         summaries.sort(key=lambda s: s.last_modified or 0, reverse=True)
+        logger.info("listed %d traces from gs://%s/%s", len(summaries), self._bucket_name, self._prefix)
         return summaries
 
     def read_first_last(self, key: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
@@ -318,7 +320,7 @@ class GCSSource:
     def _download(self, key: str, dest: Path) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
         blob_name = f"{self._prefix}{key}"
-        logger.debug("traqo ui: downloading gs://%s/%s", self._bucket_name, blob_name)
+        logger.info("downloading gs://%s/%s", self._bucket_name, blob_name)
         blob = self._bucket.blob(blob_name)
         blob.download_to_filename(str(dest))
 
