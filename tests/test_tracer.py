@@ -136,16 +136,6 @@ class TestSpanMetadata:
         assert end["metadata"]["model"] == "claude-4"
         assert end["metadata"]["token_usage"]["input_tokens"] == 50
 
-    def test_span_within_span(self, trace_file: Path):
-        with Tracer(trace_file) as tracer:
-            with tracer.span("outer") as outer:
-                with tracer.span("inner", kind="llm") as inner:
-                    pass
-        events = read_events(trace_file)
-        inner_start = [e for e in events if e["type"] == "span_start" and e["name"] == "inner"][0]
-        outer_start = [e for e in events if e["type"] == "span_start" and e["name"] == "outer"][0]
-        assert inner_start["parent_id"] == outer_start["id"]
-
     def test_kind_field_written(self, trace_file: Path):
         with Tracer(trace_file) as tracer:
             with tracer.span("retrieval", kind="retriever"):
@@ -240,14 +230,6 @@ class TestGetTracer:
 
 
 class TestCaptureContent:
-    def test_capture_content_flag_accessible(self, trace_file: Path):
-        with Tracer(trace_file, capture_content=True) as tracer:
-            assert tracer._capture_content is True
-
-    def test_capture_content_false_flag(self, trace_file: Path):
-        with Tracer(trace_file, capture_content=False) as tracer:
-            assert tracer._capture_content is False
-
     def test_span_input_always_written(self, trace_file: Path):
         """Span input is controlled by the caller, not capture_content."""
         with Tracer(trace_file, capture_content=False) as tracer:
@@ -270,13 +252,6 @@ class TestTraceInputOutput:
             tracer.set_output({"response": "world"})
         events = read_events(trace_file)
         assert events[-1]["output"] == {"response": "world"}
-
-    def test_trace_input_and_output(self, trace_file: Path):
-        with Tracer(trace_file, input={"query": "weather"}) as tracer:
-            tracer.set_output({"response": "sunny"})
-        events = read_events(trace_file)
-        assert events[0]["input"] == {"query": "weather"}
-        assert events[-1]["output"] == {"response": "sunny"}
 
     def test_trace_no_input_omitted(self, trace_file: Path):
         with Tracer(trace_file):

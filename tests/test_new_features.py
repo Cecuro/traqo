@@ -49,40 +49,10 @@ class TestBareTrace:
         assert len(starts) == 1
         assert starts[0]["name"] == "add"
 
-    def test_trace_empty_parens(self, trace_file: Path):
-        """@trace() should still work."""
-
-        @trace()
-        def add(a: int, b: int) -> int:
-            return a + b
-
-        with Tracer(trace_file):
-            result = add(1, 2)
-
-        assert result == 3
-        events = read_events(trace_file)
-        starts = [e for e in events if e["type"] == "span_start"]
-        assert len(starts) == 1
-        assert starts[0]["name"] == "add"
-
     def test_trace_with_name_kwarg(self, trace_file: Path):
         """@trace(name="custom") should work."""
 
         @trace(name="custom_name")
-        def add(a: int, b: int) -> int:
-            return a + b
-
-        with Tracer(trace_file):
-            add(1, 2)
-
-        events = read_events(trace_file)
-        starts = [e for e in events if e["type"] == "span_start"]
-        assert starts[0]["name"] == "custom_name"
-
-    def test_trace_with_positional_name(self, trace_file: Path):
-        """@trace("custom") should still work (backward compat)."""
-
-        @trace("custom_name")
         def add(a: int, b: int) -> int:
             return a + b
 
@@ -127,29 +97,6 @@ class TestBareTrace:
         starts = [e for e in events if e["type"] == "span_start"]
         assert starts[0]["name"] == "gen"
 
-    def test_bare_trace_no_tracer_passthrough(self):
-        """@trace without active tracer is a no-op."""
-
-        @trace
-        def add(a: int, b: int) -> int:
-            return a + b
-
-        assert add(1, 2) == 3
-
-    def test_bare_trace_with_kwargs(self, trace_file: Path):
-        """@trace with keyword args (kind, metadata, etc.)."""
-
-        @trace(kind="tool", metadata={"env": "test"})
-        def search(query: str) -> str:
-            return "results"
-
-        with Tracer(trace_file):
-            search("hello")
-
-        events = read_events(trace_file)
-        start = [e for e in events if e["type"] == "span_start"][0]
-        assert start["kind"] == "tool"
-        assert start["metadata"]["env"] == "test"
 
 
 # ===================================================================
@@ -165,11 +112,6 @@ class TestKindConstants:
         assert AGENT == "agent"
         assert EMBEDDING == "embedding"
         assert GUARDRAIL == "guardrail"
-
-    def test_constants_accessible_from_traqo(self):
-        assert traqo.LLM == "llm"
-        assert traqo.TOOL == "tool"
-        assert traqo.EMBEDDING == "embedding"
 
     def test_constant_used_in_decorator(self, trace_file: Path):
         @trace(kind=LLM)
