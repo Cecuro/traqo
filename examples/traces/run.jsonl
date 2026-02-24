@@ -1,0 +1,6 @@
+{"type": "trace_start", "ts": "2026-02-23T15:43:16.279837+00:00", "tracer_version": "0.2.0", "input": {"query": "demo"}}
+{"type": "span_start", "id": "af8138c43418", "parent_id": null, "name": "step_1", "ts": "2026-02-23T15:43:16.280118+00:00", "kind": "tool"}
+{"type": "span_end", "id": "af8138c43418", "parent_id": null, "name": "step_1", "ts": "2026-02-23T15:43:16.305183+00:00", "duration_s": 0.025, "status": "ok", "kind": "tool", "output": {"status": "ok"}}
+{"type": "span_start", "id": "2117ef1116ad", "parent_id": null, "name": "step_2", "ts": "2026-02-23T15:43:16.305277+00:00", "kind": "llm"}
+{"type": "span_end", "id": "2117ef1116ad", "parent_id": null, "name": "step_2", "ts": "2026-02-23T15:43:16.330348+00:00", "duration_s": 0.025, "status": "ok", "kind": "llm", "output": "Generated answer.", "metadata": {"token_usage": {"input_tokens": 10, "output_tokens": 5}}}
+{"type": "trace_end", "ts": "2026-02-23T15:43:16.330447+00:00", "duration_s": 0.051, "stats": {"spans": 2, "events": 0, "total_input_tokens": 10, "total_output_tokens": 5, "errors": 0}, "output": {"answer": "Generated answer."}}
