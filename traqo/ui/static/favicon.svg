@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Pedro the Raccoon - traqo mascot -->
+  <!-- Whole head tilted like the meme -->
+  <g transform="rotate(-8, 32, 32)">
+    <!-- Ears (rounded, dark grey with pink inner) -->
+    <ellipse cx="16" cy="10" rx="9" ry="10" fill="#6b6b6b"/>
+    <ellipse cx="48" cy="10" rx="9" ry="10" fill="#6b6b6b"/>
+    <ellipse cx="16" cy="10" rx="5" ry="6" fill="#d4a0a0"/>
+    <ellipse cx="48" cy="10" rx="5" ry="6" fill="#d4a0a0"/>
+    <!-- Head (darker grey, more raccoon-like) -->
+    <ellipse cx="32" cy="32" rx="24" ry="23" fill="#7a7a7a"/>
+    <!-- Lighter face/snout area (cream, more pointed/elongated) -->
+    <ellipse cx="32" cy="38" rx="15" ry="14" fill="#e5ddd4"/>
+    <!-- Forehead fur stripe (dark line down center) -->
+    <path d="M32 12 Q33 18 32 24" fill="none" stroke="#4a4a4a" stroke-width="2.5" stroke-linecap="round"/>
+    <!-- Dark mask - wider, thicker band across eyes like real raccoon -->
+    <path d="M8 24 Q16 20 24 23 Q28 24 32 23.5 Q36 24 40 23 Q48 20 56 24 Q56 34 48 32 Q42 30 38 30 Q34 31 32 31 Q30 31 26 30 Q22 30 16 32 Q8 34 8 24Z" fill="#1e1e1e"/>
+    <!-- Eyes - bigger, more expressive, looking upward like Pedro -->
+    <ellipse cx="22" cy="27.5" rx="6" ry="5.5" fill="white"/>
+    <ellipse cx="42" cy="27.5" rx="6" ry="5.5" fill="white"/>
+    <!-- Pupils - looking up and slightly to the side -->
+    <circle cx="23" cy="26" r="3.5" fill="#1a1a1a"/>
+    <circle cx="43" cy="26" r="3.5" fill="#1a1a1a"/>
+    <!-- Eye shine -->
+    <circle cx="24.5" cy="24.5" r="1.2" fill="white"/>
+    <circle cx="44.5" cy="24.5" r="1.2" fill="white"/>
+    <!-- Snout - more pointed, elongated -->
+    <ellipse cx="32" cy="42" rx="8" ry="6" fill="#ddd5cc"/>
+    <!-- Nose - dark, prominent -->
+    <ellipse cx="32" cy="39.5" rx="4" ry="2.8" fill="#1e1e1e"/>
+    <ellipse cx="32" cy="39" rx="1.5" ry="0.7" fill="#555"/>
+    <!-- Mouth - subtle -->
+    <path d="M29 42.5 Q32 45 35 42.5" fill="none" stroke="#3a3a3a" stroke-width="1" stroke-linecap="round"/>
+    <!-- Whisker dots -->
+    <circle cx="24" cy="42" r="0.6" fill="#8a8a8a"/>
+    <circle cx="22" cy="43.5" r="0.6" fill="#8a8a8a"/>
+    <circle cx="40" cy="42" r="0.6" fill="#8a8a8a"/>
+    <circle cx="42" cy="43.5" r="0.6" fill="#8a8a8a"/>
+  </g>
+  <!-- Paw - raised up high on the right side, pressing against glass like Pedro -->
+  <g transform="rotate(10, 56, 38)">
+    <!-- Arm -->
+    <ellipse cx="57" cy="44" rx="5.5" ry="8" fill="#6b6b6b"/>
+    <!-- Palm -->
+    <ellipse cx="57" cy="36" rx="6" ry="5.5" fill="#6b6b6b"/>
+    <ellipse cx="57" cy="37" rx="4" ry="3.5" fill="#c4b5a5"/>
+    <!-- Fingers/toes spread out -->
+    <ellipse cx="52" cy="32" rx="2" ry="3" fill="#6b6b6b"/>
+    <ellipse cx="55.5" cy="31" rx="2" ry="3" fill="#6b6b6b"/>
+    <ellipse cx="59" cy="31" rx="2" ry="3" fill="#6b6b6b"/>
+    <ellipse cx="62" cy="32.5" rx="2" ry="2.5" fill="#6b6b6b"/>
+    <!-- Tiny paw pads -->
+    <circle cx="52" cy="31.5" r="1" fill="#c4b5a5"/>
+    <circle cx="55.5" cy="30.5" r="1" fill="#c4b5a5"/>
+    <circle cx="59" cy="30.5" r="1" fill="#c4b5a5"/>
+    <circle cx="62" cy="32" r="0.8" fill="#c4b5a5"/>
+  </g>
+</svg>
