@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 try:
@@ -12,6 +13,14 @@ except ImportError:
     )
 
 from traqo.tracer import get_tracer
+
+_ANTHROPIC_MODEL_PARAMS = ("temperature", "max_tokens", "top_p", "top_k")
+
+
+def _extract_model_params(kwargs: dict[str, Any], param_names: tuple[str, ...]) -> dict[str, Any] | None:
+    """Extract generation parameters present in kwargs."""
+    params = {k: kwargs[k] for k in param_names if k in kwargs}
+    return params or None
 
 
 def _extract_tool_use(content: list[Any]) -> list[dict[str, Any]] | None:
@@ -149,6 +158,7 @@ class _StreamWrapper:
         self._tracer = tracer
         self._capture_content = capture_content
         self._events: list[Any] = []
+        self._t0 = time.perf_counter()
 
     def __iter__(self):
         return self
@@ -157,6 +167,9 @@ class _StreamWrapper:
         try:
             event = next(self._stream)
             self._events.append(event)
+            if len(self._events) == 1:
+                ttft = time.perf_counter() - self._t0
+                self._span.set_metadata("time_to_first_token_s", round(ttft, 3))
             return event
         except StopIteration:
             self._finalize()
@@ -191,6 +204,7 @@ class _AsyncStreamWrapper:
         self._tracer = tracer
         self._capture_content = capture_content
         self._events: list[Any] = []
+        self._t0 = time.perf_counter()
 
     def __aiter__(self):
         return self
@@ -199,6 +213,9 @@ class _AsyncStreamWrapper:
         try:
             event = await self._stream.__anext__()
             self._events.append(event)
+            if len(self._events) == 1:
+                ttft = time.perf_counter() - self._t0
+                self._span.set_metadata("time_to_first_token_s", round(ttft, 3))
             return event
         except StopAsyncIteration:
             self._finalize()
@@ -241,6 +258,9 @@ class _TracedMessages:
         span_meta: dict[str, Any] = {"provider": "anthropic"}
         if self._operation:
             span_meta["operation"] = self._operation
+        model_params = _extract_model_params(kwargs, _ANTHROPIC_MODEL_PARAMS)
+        if model_params:
+            span_meta["model_parameters"] = model_params
         input_data = _extract_messages(kwargs) if tracer.capture_content else None
 
         is_stream = kwargs.get("stream", False)
@@ -284,6 +304,9 @@ class _TracedMessages:
         span_meta: dict[str, Any] = {"provider": "anthropic"}
         if self._operation:
             span_meta["operation"] = self._operation
+        model_params = _extract_model_params(kwargs, _ANTHROPIC_MODEL_PARAMS)
+        if model_params:
+            span_meta["model_parameters"] = model_params
         input_data = _extract_messages(kwargs) if tracer.capture_content else None
 
         span_ctx = tracer.span(
@@ -317,6 +340,9 @@ class _TracedAsyncMessages:
         span_meta: dict[str, Any] = {"provider": "anthropic"}
         if self._operation:
             span_meta["operation"] = self._operation
+        model_params = _extract_model_params(kwargs, _ANTHROPIC_MODEL_PARAMS)
+        if model_params:
+            span_meta["model_parameters"] = model_params
         input_data = _extract_messages(kwargs) if tracer.capture_content else None
 
         is_stream = kwargs.get("stream", False)
@@ -360,6 +386,9 @@ class _TracedAsyncMessages:
         span_meta: dict[str, Any] = {"provider": "anthropic"}
         if self._operation:
             span_meta["operation"] = self._operation
+        model_params = _extract_model_params(kwargs, _ANTHROPIC_MODEL_PARAMS)
+        if model_params:
+            span_meta["model_parameters"] = model_params
         input_data = _extract_messages(kwargs) if tracer.capture_content else None
 
         span_ctx = tracer.span(

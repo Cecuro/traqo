@@ -7,7 +7,20 @@ import os
 from traqo._version import __version__
 from traqo.backend import Backend, flush_backends, shutdown_backends
 from traqo.decorator import trace
-from traqo.tracer import Span, Tracer, get_current_span, get_tracer
+from traqo.tracer import (
+    AGENT,
+    CHAIN,
+    EMBEDDING,
+    GUARDRAIL,
+    LLM,
+    RETRIEVER,
+    TOOL,
+    Span,
+    Tracer,
+    get_current_span,
+    get_tracer,
+    update_current_span,
+)
 
 _disabled: bool = os.environ.get("TRAQO_DISABLED", "").strip() in ("1", "true", "yes")
 
@@ -31,9 +44,18 @@ __all__ = [
     "trace",
     "get_tracer",
     "get_current_span",
+    "update_current_span",
     "disable",
     "enable",
     "flush_backends",
     "shutdown_backends",
     "__version__",
+    # Span kind constants
+    "LLM",
+    "TOOL",
+    "RETRIEVER",
+    "CHAIN",
+    "AGENT",
+    "EMBEDDING",
+    "GUARDRAIL",
 ]

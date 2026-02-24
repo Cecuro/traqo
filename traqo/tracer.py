@@ -20,6 +20,15 @@ from traqo.serialize import serialize_error, to_json
 
 logger = logging.getLogger(__name__)
 
+# Span kind constants
+LLM = "llm"
+TOOL = "tool"
+RETRIEVER = "retriever"
+CHAIN = "chain"
+AGENT = "agent"
+EMBEDDING = "embedding"
+GUARDRAIL = "guardrail"
+
 _active_tracer: ContextVar[Tracer | None] = ContextVar("_active_tracer", default=None)
 _span_stack: ContextVar[tuple[Span, ...]] = ContextVar("_span_stack", default=())
 
@@ -488,3 +497,37 @@ async def _child_aexit(self: Tracer, exc_type, exc_val, exc_tb):
 
 Tracer.__aenter__ = _child_aenter
 Tracer.__aexit__ = _child_aexit
+
+
+# ---------------------------------------------------------------------------
+# Convenience helper
+# ---------------------------------------------------------------------------
+
+class _Unset:
+    """Sentinel to distinguish 'not provided' from None."""
+    __slots__ = ()
+    def __repr__(self) -> str:
+        return "<UNSET>"
+
+_UNSET = _Unset()
+
+
+def update_current_span(
+    *,
+    output: Any = _UNSET,
+    metadata: dict[str, Any] | None = None,
+    tags: list[str] | None = None,
+    **kw_metadata: Any,
+) -> None:
+    """Update the current span's metadata/output. No-op if no span active."""
+    span = get_current_span()
+    if span is None:
+        return
+    if not isinstance(output, _Unset):
+        span.set_output(output)
+    if metadata:
+        span.update_metadata(metadata)
+    if kw_metadata:
+        span.update_metadata(kw_metadata)
+    if tags:
+        span.tags = (span.tags or []) + tags

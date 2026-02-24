@@ -12,7 +12,7 @@ from traqo.tracer import get_tracer
 
 
 def trace(
-    name: str | None = None,
+    _func_or_name: Callable | str | None = None,
     *,
     capture_input: bool = True,
     capture_output: bool = True,
@@ -20,8 +20,12 @@ def trace(
     metadata: dict[str, Any] | None = None,
     tags: list[str] | None = None,
     kind: str | None = None,
+    name: str | None = None,
 ) -> Callable:
     """Decorator that wraps a function in a tracing span.
+
+    Supports bare ``@trace``, ``@trace()``, ``@trace("name")``, and
+    ``@trace(name="name")``.
 
     When no tracer is active: pure passthrough, zero overhead.
     Supports sync functions, async functions, generators, and async generators.
@@ -31,10 +35,21 @@ def trace(
             (e.g. ``["password", "api_key"]``).
     """
 
+    # Resolve name: either from keyword `name=` or positional string arg.
+    if isinstance(_func_or_name, str):
+        span_name_override: str | None = _func_or_name
+        target_func: Callable | None = None
+    elif callable(_func_or_name):
+        span_name_override = name
+        target_func = _func_or_name
+    else:
+        span_name_override = name
+        target_func = None
+
     _ignore = set(ignore_arguments) if ignore_arguments else set()
 
     def decorator(func: Callable) -> Callable:
-        span_name = name or func.__name__
+        resolved_name = span_name_override or func.__name__
         sig = inspect.signature(func)
 
         def _extract_args(args: tuple, kwargs: dict) -> dict[str, Any]:
@@ -73,7 +88,7 @@ def trace(
                 tracer = get_tracer()
                 input_data = _make_input(args, kwargs)
                 with tracer.span(
-                    span_name, input=input_data, metadata=metadata, tags=tags, kind=kind
+                    resolved_name, input=input_data, metadata=metadata, tags=tags, kind=kind
                 ) as span:
                     collected: list[Any] = []
                     async for item in func(*args, **kwargs):
@@ -95,7 +110,7 @@ def trace(
                 tracer = get_tracer()
                 input_data = _make_input(args, kwargs)
                 with tracer.span(
-                    span_name, input=input_data, metadata=metadata, tags=tags, kind=kind
+                    resolved_name, input=input_data, metadata=metadata, tags=tags, kind=kind
                 ) as span:
                     collected: list[Any] = []
                     for item in func(*args, **kwargs):
@@ -116,7 +131,7 @@ def trace(
                 tracer = get_tracer()
                 input_data = _make_input(args, kwargs)
                 with tracer.span(
-                    span_name, input=input_data, metadata=metadata, tags=tags, kind=kind
+                    resolved_name, input=input_data, metadata=metadata, tags=tags, kind=kind
                 ) as span:
                     result = await func(*args, **kwargs)
                     if capture_output:
@@ -135,7 +150,7 @@ def trace(
                 tracer = get_tracer()
                 input_data = _make_input(args, kwargs)
                 with tracer.span(
-                    span_name, input=input_data, metadata=metadata, tags=tags, kind=kind
+                    resolved_name, input=input_data, metadata=metadata, tags=tags, kind=kind
                 ) as span:
                     result = func(*args, **kwargs)
                     if capture_output:
@@ -144,4 +159,6 @@ def trace(
 
             return sync_wrapper
 
+    if target_func is not None:
+        return decorator(target_func)
     return decorator
