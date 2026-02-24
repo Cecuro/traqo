@@ -138,9 +138,31 @@ class Tracer:
         self._stats_output_tokens = 0
         self._children: list[dict[str, Any]] = []
 
+    @property
+    def capture_content(self) -> bool:
+        """Whether content capture is enabled for this tracer."""
+        return self._capture_content
+
     def set_output(self, output: Any) -> None:
         """Set trace-level output. Written to trace_end."""
         self._output = output
+
+    def write_event(self, event: dict[str, Any]) -> None:
+        """Write a raw event dict to the trace file. For use by integrations."""
+        self._write(event)
+
+    def record_span(self) -> None:
+        """Increment the span counter. For use by integrations."""
+        self._stats_spans += 1
+
+    def record_error(self) -> None:
+        """Increment the error counter. For use by integrations."""
+        self._stats_errors += 1
+
+    def record_tokens(self, input_tokens: int = 0, output_tokens: int = 0) -> None:
+        """Accumulate token counts. For use by integrations."""
+        self._stats_input_tokens += input_tokens
+        self._stats_output_tokens += output_tokens
 
     def _open(self) -> None:
         if self._disabled:
@@ -163,7 +185,8 @@ class Tracer:
                 self._file.flush()
         except Exception:
             logger.warning("traqo: failed to write event", exc_info=True)
-        # Notify backends (outside the lock).
+            return
+        # Notify backends (outside the lock, only on successful write).
         # The event dict is shared across backends and should not be mutated.
         self._notify_backends_event(event)
 
@@ -319,28 +342,31 @@ class Tracer:
         _push_span(span_obj)
         try:
             yield span_obj
-        except BaseException as exc:
+        except BaseException:
             duration = (datetime.now(timezone.utc) - start).total_seconds()
             self._stats_spans += 1
             self._stats_errors += 1
-            self._accumulate_tokens(span_obj)
-            end_event: dict[str, Any] = {
-                "type": "span_end",
-                "id": span_id,
-                "parent_id": parent_id,
-                "name": name,
-                "ts": _now(),
-                "duration_s": round(duration, 3),
-                "status": "error",
-                "error": serialize_error(exc),
-            }
-            if kind is not None:
-                end_event["kind"] = kind
-            if span_obj.tags:
-                end_event["tags"] = span_obj.tags
-            if span_obj.metadata:
-                end_event["metadata"] = span_obj.metadata
-            self._write(end_event)
+            try:
+                self._accumulate_tokens(span_obj)
+                end_event: dict[str, Any] = {
+                    "type": "span_end",
+                    "id": span_id,
+                    "parent_id": parent_id,
+                    "name": name,
+                    "ts": _now(),
+                    "duration_s": round(duration, 3),
+                    "status": "error",
+                    "error": serialize_error(__import__("sys").exc_info()[1]),
+                }
+                if kind is not None:
+                    end_event["kind"] = kind
+                if span_obj.tags:
+                    end_event["tags"] = span_obj.tags
+                if span_obj.metadata:
+                    end_event["metadata"] = span_obj.metadata
+                self._write(end_event)
+            except Exception:
+                logger.warning("traqo: failed to write span_end on error", exc_info=True)
             raise
         finally:
             _pop_span()

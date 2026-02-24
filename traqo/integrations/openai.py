@@ -226,7 +226,7 @@ class _TracedCompletions:
         span_meta: dict[str, Any] = {"provider": "openai"}
         if self._operation:
             span_meta["operation"] = self._operation
-        input_data = _extract_messages(kwargs) if tracer._capture_content else None
+        input_data = _extract_messages(kwargs) if tracer.capture_content else None
 
         is_stream = kwargs.get("stream", False)
 
@@ -245,7 +245,7 @@ class _TracedCompletions:
                 if "stream_options" not in kwargs:
                     kwargs["stream_options"] = {"include_usage": True}
                 stream = self._completions.create(**kwargs)
-                return _StreamWrapper(stream, span, tracer, tracer._capture_content)
+                return _StreamWrapper(stream, span, tracer, tracer.capture_content)
             except BaseException:
                 span_ctx.__exit__(*__import__("sys").exc_info())
                 raise
@@ -261,7 +261,7 @@ class _TracedCompletions:
                 span.set_metadata("model", model)
                 if usage:
                     span.set_metadata("token_usage", usage)
-                if tracer._capture_content:
+                if tracer.capture_content:
                     span.set_output(output)
                 return response
 
@@ -282,7 +282,7 @@ class _TracedAsyncCompletions:
         span_meta: dict[str, Any] = {"provider": "openai"}
         if self._operation:
             span_meta["operation"] = self._operation
-        input_data = _extract_messages(kwargs) if tracer._capture_content else None
+        input_data = _extract_messages(kwargs) if tracer.capture_content else None
 
         is_stream = kwargs.get("stream", False)
 
@@ -298,7 +298,7 @@ class _TracedAsyncCompletions:
                 if "stream_options" not in kwargs:
                     kwargs["stream_options"] = {"include_usage": True}
                 stream = await self._completions.create(**kwargs)
-                return _AsyncStreamWrapper(stream, span, tracer, tracer._capture_content)
+                return _AsyncStreamWrapper(stream, span, tracer, tracer.capture_content)
             except BaseException:
                 span_ctx.__exit__(*__import__("sys").exc_info())
                 raise
@@ -314,7 +314,7 @@ class _TracedAsyncCompletions:
                 span.set_metadata("model", model)
                 if usage:
                     span.set_metadata("token_usage", usage)
-                if tracer._capture_content:
+                if tracer.capture_content:
                     span.set_output(output)
                 return response
 

@@ -241,7 +241,7 @@ class _TracedMessages:
         span_meta: dict[str, Any] = {"provider": "anthropic"}
         if self._operation:
             span_meta["operation"] = self._operation
-        input_data = _extract_messages(kwargs) if tracer._capture_content else None
+        input_data = _extract_messages(kwargs) if tracer.capture_content else None
 
         is_stream = kwargs.get("stream", False)
 
@@ -255,7 +255,7 @@ class _TracedMessages:
             span = span_ctx.__enter__()
             try:
                 stream = self._messages.create(**kwargs)
-                return _StreamWrapper(stream, span, tracer, tracer._capture_content)
+                return _StreamWrapper(stream, span, tracer, tracer.capture_content)
             except BaseException:
                 span_ctx.__exit__(*__import__("sys").exc_info())
                 raise
@@ -271,7 +271,7 @@ class _TracedMessages:
                 span.set_metadata("model", model)
                 if usage:
                     span.set_metadata("token_usage", usage)
-                if tracer._capture_content:
+                if tracer.capture_content:
                     span.set_output(output)
                 return response
 
@@ -284,7 +284,7 @@ class _TracedMessages:
         span_meta: dict[str, Any] = {"provider": "anthropic"}
         if self._operation:
             span_meta["operation"] = self._operation
-        input_data = _extract_messages(kwargs) if tracer._capture_content else None
+        input_data = _extract_messages(kwargs) if tracer.capture_content else None
 
         span_ctx = tracer.span(
             self._operation or "anthropic.messages.stream",
@@ -295,7 +295,7 @@ class _TracedMessages:
         span = span_ctx.__enter__()
         try:
             stream = self._messages.stream(**kwargs)
-            return _StreamWrapper(stream, span, tracer, tracer._capture_content)
+            return _StreamWrapper(stream, span, tracer, tracer.capture_content)
         except BaseException:
             span_ctx.__exit__(*__import__("sys").exc_info())
             raise
@@ -317,7 +317,7 @@ class _TracedAsyncMessages:
         span_meta: dict[str, Any] = {"provider": "anthropic"}
         if self._operation:
             span_meta["operation"] = self._operation
-        input_data = _extract_messages(kwargs) if tracer._capture_content else None
+        input_data = _extract_messages(kwargs) if tracer.capture_content else None
 
         is_stream = kwargs.get("stream", False)
 
@@ -331,7 +331,7 @@ class _TracedAsyncMessages:
             span = span_ctx.__enter__()
             try:
                 stream = await self._messages.create(**kwargs)
-                return _AsyncStreamWrapper(stream, span, tracer, tracer._capture_content)
+                return _AsyncStreamWrapper(stream, span, tracer, tracer.capture_content)
             except BaseException:
                 span_ctx.__exit__(*__import__("sys").exc_info())
                 raise
@@ -347,7 +347,7 @@ class _TracedAsyncMessages:
                 span.set_metadata("model", model)
                 if usage:
                     span.set_metadata("token_usage", usage)
-                if tracer._capture_content:
+                if tracer.capture_content:
                     span.set_output(output)
                 return response
 
@@ -360,7 +360,7 @@ class _TracedAsyncMessages:
         span_meta: dict[str, Any] = {"provider": "anthropic"}
         if self._operation:
             span_meta["operation"] = self._operation
-        input_data = _extract_messages(kwargs) if tracer._capture_content else None
+        input_data = _extract_messages(kwargs) if tracer.capture_content else None
 
         span_ctx = tracer.span(
             self._operation or "anthropic.messages.stream",
@@ -371,7 +371,7 @@ class _TracedAsyncMessages:
         span = span_ctx.__enter__()
         try:
             stream = await self._messages.stream(**kwargs)
-            return _AsyncStreamWrapper(stream, span, tracer, tracer._capture_content)
+            return _AsyncStreamWrapper(stream, span, tracer, tracer.capture_content)
         except BaseException:
             span_ctx.__exit__(*__import__("sys").exc_info())
             raise

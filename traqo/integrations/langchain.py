@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -153,11 +154,21 @@ class TraqoCallback(BaseCallbackHandler):
     def __init__(self) -> None:
         super().__init__()
         self._runs: dict[UUID, dict[str, Any]] = {}
+        self._lock = threading.Lock()
 
     def _resolve_parent_id(self, parent_run_id: UUID | None) -> str | None:
-        if parent_run_id and parent_run_id in self._runs:
-            return self._runs[parent_run_id]["span_id"]
+        with self._lock:
+            if parent_run_id and parent_run_id in self._runs:
+                return self._runs[parent_run_id]["span_id"]
         return _get_parent_id()
+
+    def _store_run(self, run_id: UUID, info: dict[str, Any]) -> None:
+        with self._lock:
+            self._runs[run_id] = info
+
+    def _pop_run(self, run_id: UUID) -> dict[str, Any] | None:
+        with self._lock:
+            return self._runs.pop(run_id, None)
 
     def _extract_model_from_serialized(self, serialized: dict[str, Any]) -> str:
         kwargs = serialized.get("kwargs", {})
@@ -169,6 +180,47 @@ class TraqoCallback(BaseCallbackHandler):
         return id_parts[-1] if id_parts else "unknown"
 
     # -- LLM callbacks --
+
+    def on_llm_start(
+        self,
+        serialized: dict[str, Any],
+        prompts: list[str],
+        *,
+        run_id: UUID,
+        parent_run_id: UUID | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Fallback for non-chat LLM types (e.g. completion models)."""
+        tracer = get_tracer()
+        if not tracer:
+            return
+
+        span_id = _uuid()
+        parent_id = self._resolve_parent_id(parent_run_id)
+        start = datetime.now(timezone.utc)
+        model = self._extract_model_from_serialized(serialized)
+
+        meta: dict[str, Any] = {"provider": "langchain", "model": model}
+        start_event: dict[str, Any] = {
+            "type": "span_start",
+            "id": span_id,
+            "parent_id": parent_id,
+            "name": model,
+            "ts": start.isoformat(),
+            "kind": "llm",
+            "metadata": meta.copy(),
+        }
+        if tracer.capture_content and prompts:
+            start_event["input"] = prompts
+
+        tracer.write_event(start_event)
+        self._store_run(run_id, {
+            "span_id": span_id,
+            "parent_id": parent_id,
+            "name": model,
+            "start": start,
+            "metadata": meta,
+        })
 
     def on_chat_model_start(
         self,
@@ -198,17 +250,17 @@ class TraqoCallback(BaseCallbackHandler):
             "kind": "llm",
             "metadata": meta.copy(),
         }
-        if tracer._capture_content and messages:
+        if tracer.capture_content and messages:
             start_event["input"] = _messages_to_dicts(messages[0])
 
-        tracer._write(start_event)
-        self._runs[run_id] = {
+        tracer.write_event(start_event)
+        self._store_run(run_id, {
             "span_id": span_id,
             "parent_id": parent_id,
             "name": model,
             "start": start,
             "metadata": meta,
-        }
+        })
 
     def on_llm_end(
         self,
@@ -219,10 +271,9 @@ class TraqoCallback(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         tracer = get_tracer()
-        if not tracer or run_id not in self._runs:
+        info = self._pop_run(run_id) if tracer else None
+        if not info:
             return
-
-        info = self._runs.pop(run_id)
         duration = (datetime.now(timezone.utc) - info["start"]).total_seconds()
         meta = info["metadata"]
 
@@ -241,14 +292,16 @@ class TraqoCallback(BaseCallbackHandler):
             "kind": "llm",
             "metadata": meta,
         }
-        if tracer._capture_content:
+        if tracer.capture_content:
             end_event["output"] = _extract_output_from_response(response)
 
-        tracer._write(end_event)
-        tracer._stats_spans += 1
+        tracer.write_event(end_event)
+        tracer.record_span()
         if usage:
-            tracer._stats_input_tokens += usage.get("input_tokens", 0)
-            tracer._stats_output_tokens += usage.get("output_tokens", 0)
+            tracer.record_tokens(
+                input_tokens=usage.get("input_tokens", 0),
+                output_tokens=usage.get("output_tokens", 0),
+            )
 
     def on_llm_error(
         self,
@@ -259,12 +312,11 @@ class TraqoCallback(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         tracer = get_tracer()
-        if not tracer or run_id not in self._runs:
+        info = self._pop_run(run_id) if tracer else None
+        if not info:
             return
-
-        info = self._runs.pop(run_id)
         duration = (datetime.now(timezone.utc) - info["start"]).total_seconds()
-        tracer._write({
+        tracer.write_event({
             "type": "span_end",
             "id": info["span_id"],
             "parent_id": info["parent_id"],
@@ -276,8 +328,8 @@ class TraqoCallback(BaseCallbackHandler):
             "error": serialize_error(error),
             "metadata": info["metadata"],
         })
-        tracer._stats_spans += 1
-        tracer._stats_errors += 1
+        tracer.record_span()
+        tracer.record_error()
 
     # -- Tool callbacks --
 
@@ -307,17 +359,17 @@ class TraqoCallback(BaseCallbackHandler):
             "ts": start.isoformat(),
             "kind": "tool",
         }
-        if tracer._capture_content:
+        if tracer.capture_content:
             start_event["input"] = input_str
 
-        tracer._write(start_event)
-        self._runs[run_id] = {
+        tracer.write_event(start_event)
+        self._store_run(run_id, {
             "span_id": span_id,
             "parent_id": parent_id,
             "name": name,
             "start": start,
             "metadata": {},
-        }
+        })
 
     def on_tool_end(
         self,
@@ -328,10 +380,9 @@ class TraqoCallback(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         tracer = get_tracer()
-        if not tracer or run_id not in self._runs:
+        info = self._pop_run(run_id) if tracer else None
+        if not info:
             return
-
-        info = self._runs.pop(run_id)
         duration = (datetime.now(timezone.utc) - info["start"]).total_seconds()
         end_event: dict[str, Any] = {
             "type": "span_end",
@@ -343,11 +394,11 @@ class TraqoCallback(BaseCallbackHandler):
             "status": "ok",
             "kind": "tool",
         }
-        if tracer._capture_content:
+        if tracer.capture_content:
             end_event["output"] = str(output)
 
-        tracer._write(end_event)
-        tracer._stats_spans += 1
+        tracer.write_event(end_event)
+        tracer.record_span()
 
     def on_tool_error(
         self,
@@ -358,12 +409,11 @@ class TraqoCallback(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         tracer = get_tracer()
-        if not tracer or run_id not in self._runs:
+        info = self._pop_run(run_id) if tracer else None
+        if not info:
             return
-
-        info = self._runs.pop(run_id)
         duration = (datetime.now(timezone.utc) - info["start"]).total_seconds()
-        tracer._write({
+        tracer.write_event({
             "type": "span_end",
             "id": info["span_id"],
             "parent_id": info["parent_id"],
@@ -374,8 +424,8 @@ class TraqoCallback(BaseCallbackHandler):
             "kind": "tool",
             "error": serialize_error(error),
         })
-        tracer._stats_spans += 1
-        tracer._stats_errors += 1
+        tracer.record_span()
+        tracer.record_error()
 
     # -- Retriever callbacks --
 
@@ -406,17 +456,17 @@ class TraqoCallback(BaseCallbackHandler):
             "ts": start.isoformat(),
             "kind": "retriever",
         }
-        if tracer._capture_content:
+        if tracer.capture_content:
             start_event["input"] = query
 
-        tracer._write(start_event)
-        self._runs[run_id] = {
+        tracer.write_event(start_event)
+        self._store_run(run_id, {
             "span_id": span_id,
             "parent_id": parent_id,
             "name": name,
             "start": start,
             "metadata": {},
-        }
+        })
 
     def on_retriever_end(
         self,
@@ -427,10 +477,9 @@ class TraqoCallback(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         tracer = get_tracer()
-        if not tracer or run_id not in self._runs:
+        info = self._pop_run(run_id) if tracer else None
+        if not info:
             return
-
-        info = self._runs.pop(run_id)
         duration = (datetime.now(timezone.utc) - info["start"]).total_seconds()
         end_event: dict[str, Any] = {
             "type": "span_end",
@@ -442,7 +491,7 @@ class TraqoCallback(BaseCallbackHandler):
             "status": "ok",
             "kind": "retriever",
         }
-        if tracer._capture_content and documents:
+        if tracer.capture_content and documents:
             end_event["output"] = [
                 {
                     "page_content": getattr(doc, "page_content", str(doc)),
@@ -451,8 +500,8 @@ class TraqoCallback(BaseCallbackHandler):
                 for doc in documents
             ]
 
-        tracer._write(end_event)
-        tracer._stats_spans += 1
+        tracer.write_event(end_event)
+        tracer.record_span()
 
     def on_retriever_error(
         self,
@@ -463,12 +512,11 @@ class TraqoCallback(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         tracer = get_tracer()
-        if not tracer or run_id not in self._runs:
+        info = self._pop_run(run_id) if tracer else None
+        if not info:
             return
-
-        info = self._runs.pop(run_id)
         duration = (datetime.now(timezone.utc) - info["start"]).total_seconds()
-        tracer._write({
+        tracer.write_event({
             "type": "span_end",
             "id": info["span_id"],
             "parent_id": info["parent_id"],
@@ -479,8 +527,8 @@ class TraqoCallback(BaseCallbackHandler):
             "kind": "retriever",
             "error": serialize_error(error),
         })
-        tracer._stats_spans += 1
-        tracer._stats_errors += 1
+        tracer.record_span()
+        tracer.record_error()
 
     # -- Chain callbacks --
 
@@ -511,17 +559,17 @@ class TraqoCallback(BaseCallbackHandler):
             "ts": start.isoformat(),
             "kind": "chain",
         }
-        if tracer._capture_content:
+        if tracer.capture_content:
             start_event["input"] = inputs
 
-        tracer._write(start_event)
-        self._runs[run_id] = {
+        tracer.write_event(start_event)
+        self._store_run(run_id, {
             "span_id": span_id,
             "parent_id": parent_id,
             "name": name,
             "start": start,
             "metadata": {},
-        }
+        })
 
     def on_chain_end(
         self,
@@ -532,10 +580,9 @@ class TraqoCallback(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         tracer = get_tracer()
-        if not tracer or run_id not in self._runs:
+        info = self._pop_run(run_id) if tracer else None
+        if not info:
             return
-
-        info = self._runs.pop(run_id)
         duration = (datetime.now(timezone.utc) - info["start"]).total_seconds()
         end_event: dict[str, Any] = {
             "type": "span_end",
@@ -547,11 +594,11 @@ class TraqoCallback(BaseCallbackHandler):
             "status": "ok",
             "kind": "chain",
         }
-        if tracer._capture_content:
+        if tracer.capture_content:
             end_event["output"] = outputs
 
-        tracer._write(end_event)
-        tracer._stats_spans += 1
+        tracer.write_event(end_event)
+        tracer.record_span()
 
     def on_chain_error(
         self,
@@ -562,12 +609,11 @@ class TraqoCallback(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         tracer = get_tracer()
-        if not tracer or run_id not in self._runs:
+        info = self._pop_run(run_id) if tracer else None
+        if not info:
             return
-
-        info = self._runs.pop(run_id)
         duration = (datetime.now(timezone.utc) - info["start"]).total_seconds()
-        tracer._write({
+        tracer.write_event({
             "type": "span_end",
             "id": info["span_id"],
             "parent_id": info["parent_id"],
@@ -578,8 +624,8 @@ class TraqoCallback(BaseCallbackHandler):
             "kind": "chain",
             "error": serialize_error(error),
         })
-        tracer._stats_spans += 1
-        tracer._stats_errors += 1
+        tracer.record_span()
+        tracer.record_error()
 
     # -- Agent callbacks --
 
@@ -608,21 +654,21 @@ class TraqoCallback(BaseCallbackHandler):
             "ts": start.isoformat(),
             "kind": "agent",
         }
-        if tracer._capture_content:
+        if tracer.capture_content:
             start_event["input"] = {
                 "tool": tool,
                 "tool_input": getattr(action, "tool_input", ""),
                 "log": getattr(action, "log", ""),
             }
 
-        tracer._write(start_event)
-        self._runs[run_id] = {
+        tracer.write_event(start_event)
+        self._store_run(run_id, {
             "span_id": span_id,
             "parent_id": parent_id,
             "name": tool,
             "start": start,
             "metadata": {},
-        }
+        })
 
     def on_agent_finish(
         self,
@@ -633,10 +679,9 @@ class TraqoCallback(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         tracer = get_tracer()
-        if not tracer or run_id not in self._runs:
+        info = self._pop_run(run_id) if tracer else None
+        if not info:
             return
-
-        info = self._runs.pop(run_id)
         duration = (datetime.now(timezone.utc) - info["start"]).total_seconds()
         end_event: dict[str, Any] = {
             "type": "span_end",
@@ -648,14 +693,14 @@ class TraqoCallback(BaseCallbackHandler):
             "status": "ok",
             "kind": "agent",
         }
-        if tracer._capture_content:
+        if tracer.capture_content:
             end_event["output"] = {
                 "return_values": getattr(finish, "return_values", {}),
                 "log": getattr(finish, "log", ""),
             }
 
-        tracer._write(end_event)
-        tracer._stats_spans += 1
+        tracer.write_event(end_event)
+        tracer.record_span()
 
 
 def _extract_token_usage_from_response(response: LLMResult) -> dict[str, int]:
@@ -730,7 +775,7 @@ class TracedChatModel(BaseChatModel):
         }
         if self.operation:
             span_meta["operation"] = self.operation
-        input_data = _messages_to_dicts(messages) if tracer._capture_content else None
+        input_data = _messages_to_dicts(messages) if tracer.capture_content else None
 
         with tracer.span(
             self.operation or "langchain.chat.generate",
@@ -742,7 +787,7 @@ class TracedChatModel(BaseChatModel):
             usage = _extract_token_usage(result)
             if usage:
                 span.set_metadata("token_usage", usage)
-            if tracer._capture_content:
+            if tracer.capture_content:
                 span.set_output(_extract_output(result))
             return result
 
@@ -763,7 +808,7 @@ class TracedChatModel(BaseChatModel):
         }
         if self.operation:
             span_meta["operation"] = self.operation
-        input_data = _messages_to_dicts(messages) if tracer._capture_content else None
+        input_data = _messages_to_dicts(messages) if tracer.capture_content else None
 
         with tracer.span(
             self.operation or "langchain.chat.generate",
@@ -775,7 +820,7 @@ class TracedChatModel(BaseChatModel):
             usage = _extract_token_usage(result)
             if usage:
                 span.set_metadata("token_usage", usage)
-            if tracer._capture_content:
+            if tracer.capture_content:
                 span.set_output(_extract_output(result))
             return result
 
