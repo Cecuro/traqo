@@ -160,13 +160,15 @@ def _aggregate_stream_chunks(chunks: list[Any]) -> tuple[Any, dict[str, int], st
 class _StreamWrapper:
     """Wraps an OpenAI sync stream — accumulates chunks and writes span on close."""
 
-    def __init__(self, stream: Any, span: Any, tracer: Any, capture_content: bool) -> None:
+    def __init__(self, stream: Any, span: Any, tracer: Any, capture_content: bool, span_ctx: Any = None) -> None:
         self._stream = stream
         self._span = span
         self._tracer = tracer
         self._capture_content = capture_content
+        self._span_ctx = span_ctx
         self._chunks: list[Any] = []
         self._t0 = time.perf_counter()
+        self._finalized = False
 
     def __iter__(self):
         return self
@@ -184,12 +186,18 @@ class _StreamWrapper:
             raise
 
     def _finalize(self) -> None:
+        if self._finalized:
+            return
+        self._finalized = True
         output, usage, model = _aggregate_stream_chunks(self._chunks)
         self._span.set_metadata("model", model)
         if usage:
             self._span.set_metadata("token_usage", usage)
         if self._capture_content:
             self._span.set_output(output)
+        if self._span_ctx is not None:
+            self._span_ctx.__exit__(None, None, None)
+            self._span_ctx = None
 
     def __enter__(self):
         self._stream.__enter__()
@@ -206,13 +214,15 @@ class _StreamWrapper:
 class _AsyncStreamWrapper:
     """Wraps an OpenAI async stream — accumulates chunks and writes span on close."""
 
-    def __init__(self, stream: Any, span: Any, tracer: Any, capture_content: bool) -> None:
+    def __init__(self, stream: Any, span: Any, tracer: Any, capture_content: bool, span_ctx: Any = None) -> None:
         self._stream = stream
         self._span = span
         self._tracer = tracer
         self._capture_content = capture_content
+        self._span_ctx = span_ctx
         self._chunks: list[Any] = []
         self._t0 = time.perf_counter()
+        self._finalized = False
 
     def __aiter__(self):
         return self
@@ -230,12 +240,18 @@ class _AsyncStreamWrapper:
             raise
 
     def _finalize(self) -> None:
+        if self._finalized:
+            return
+        self._finalized = True
         output, usage, model = _aggregate_stream_chunks(self._chunks)
         self._span.set_metadata("model", model)
         if usage:
             self._span.set_metadata("token_usage", usage)
         if self._capture_content:
             self._span.set_output(output)
+        if self._span_ctx is not None:
+            self._span_ctx.__exit__(None, None, None)
+            self._span_ctx = None
 
     async def __aenter__(self):
         await self._stream.__aenter__()
@@ -256,14 +272,16 @@ class _AsyncStreamWrapper:
 class _ResponsesStreamWrapper:
     """Wraps an OpenAI Responses API sync stream."""
 
-    def __init__(self, stream: Any, span: Any, tracer: Any, capture_content: bool) -> None:
+    def __init__(self, stream: Any, span: Any, tracer: Any, capture_content: bool, span_ctx: Any = None) -> None:
         self._stream = stream
         self._span = span
         self._tracer = tracer
         self._capture_content = capture_content
+        self._span_ctx = span_ctx
         self._events: list[Any] = []
         self._t0 = time.perf_counter()
         self._got_first_text = False
+        self._finalized = False
 
     def __iter__(self):
         return self
@@ -306,8 +324,12 @@ class _ResponsesStreamWrapper:
                     self._span.set_output(_extract_responses_output(response))
 
     def _finalize(self) -> None:
-        # completed event already handled metadata; this is a fallback
-        pass
+        if self._finalized:
+            return
+        self._finalized = True
+        if self._span_ctx is not None:
+            self._span_ctx.__exit__(None, None, None)
+            self._span_ctx = None
 
     def __enter__(self):
         self._stream.__enter__()
@@ -324,14 +346,16 @@ class _ResponsesStreamWrapper:
 class _AsyncResponsesStreamWrapper:
     """Wraps an OpenAI Responses API async stream."""
 
-    def __init__(self, stream: Any, span: Any, tracer: Any, capture_content: bool) -> None:
+    def __init__(self, stream: Any, span: Any, tracer: Any, capture_content: bool, span_ctx: Any = None) -> None:
         self._stream = stream
         self._span = span
         self._tracer = tracer
         self._capture_content = capture_content
+        self._span_ctx = span_ctx
         self._events: list[Any] = []
         self._t0 = time.perf_counter()
         self._got_first_text = False
+        self._finalized = False
 
     def __aiter__(self):
         return self
@@ -374,7 +398,12 @@ class _AsyncResponsesStreamWrapper:
                     self._span.set_output(_extract_responses_output(response))
 
     def _finalize(self) -> None:
-        pass
+        if self._finalized:
+            return
+        self._finalized = True
+        if self._span_ctx is not None:
+            self._span_ctx.__exit__(None, None, None)
+            self._span_ctx = None
 
     async def __aenter__(self):
         await self._stream.__aenter__()
@@ -427,7 +456,7 @@ class _TracedCompletions:
                 if "stream_options" not in kwargs:
                     kwargs["stream_options"] = {"include_usage": True}
                 stream = self._completions.create(**kwargs)
-                return _StreamWrapper(stream, span, tracer, tracer.capture_content)
+                return _StreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
             except BaseException:
                 span_ctx.__exit__(*__import__("sys").exc_info())
                 raise
@@ -483,7 +512,7 @@ class _TracedAsyncCompletions:
                 if "stream_options" not in kwargs:
                     kwargs["stream_options"] = {"include_usage": True}
                 stream = await self._completions.create(**kwargs)
-                return _AsyncStreamWrapper(stream, span, tracer, tracer.capture_content)
+                return _AsyncStreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
             except BaseException:
                 span_ctx.__exit__(*__import__("sys").exc_info())
                 raise
@@ -639,7 +668,7 @@ class _TracedResponses:
             span = span_ctx.__enter__()
             try:
                 stream = self._responses.create(**kwargs)
-                return _ResponsesStreamWrapper(stream, span, tracer, tracer.capture_content)
+                return _ResponsesStreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
             except BaseException:
                 span_ctx.__exit__(*__import__("sys").exc_info())
                 raise
@@ -705,7 +734,7 @@ class _TracedAsyncResponses:
             span = span_ctx.__enter__()
             try:
                 stream = await self._responses.create(**kwargs)
-                return _AsyncResponsesStreamWrapper(stream, span, tracer, tracer.capture_content)
+                return _AsyncResponsesStreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
             except BaseException:
                 span_ctx.__exit__(*__import__("sys").exc_info())
                 raise

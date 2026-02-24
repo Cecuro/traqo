@@ -372,7 +372,7 @@ class Tracer:
                 if span_obj.tags:
                     end_event["tags"] = span_obj.tags
                 if span_obj.metadata:
-                    end_event["metadata"] = span_obj.metadata
+                    end_event["metadata"] = span_obj.metadata.copy()
                 self._write(end_event)
             except Exception:
                 logger.warning("traqo: failed to write span_end on error", exc_info=True)
@@ -399,7 +399,7 @@ class Tracer:
         if span_obj.output is not None:
             end_event["output"] = span_obj.output
         if span_obj.metadata:
-            end_event["metadata"] = span_obj.metadata
+            end_event["metadata"] = span_obj.metadata.copy()
         self._write(end_event)
 
     def child(self, name: str, path: Path | None = None) -> Tracer:

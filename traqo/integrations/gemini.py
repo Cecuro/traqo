@@ -75,13 +75,15 @@ def _extract_output(response: Any) -> Any:
 class _StreamWrapper:
     """Wraps a Gemini sync stream — accumulates chunks and writes span on close."""
 
-    def __init__(self, stream: Any, span: Any, tracer: Any, capture_content: bool) -> None:
+    def __init__(self, stream: Any, span: Any, tracer: Any, capture_content: bool, span_ctx: Any = None) -> None:
         self._stream = stream
         self._span = span
         self._tracer = tracer
         self._capture_content = capture_content
+        self._span_ctx = span_ctx
         self._chunks: list[Any] = []
         self._t0 = time.perf_counter()
+        self._finalized = False
 
     def __iter__(self):
         return self
@@ -99,6 +101,9 @@ class _StreamWrapper:
             raise
 
     def _finalize(self) -> None:
+        if self._finalized:
+            return
+        self._finalized = True
         # Accumulate text from all chunks
         text_parts: list[str] = []
         function_calls: list[dict[str, Any]] = []
@@ -135,6 +140,9 @@ class _StreamWrapper:
             self._span.set_metadata("token_usage", usage)
         if self._capture_content:
             self._span.set_output(output)
+        if self._span_ctx is not None:
+            self._span_ctx.__exit__(None, None, None)
+            self._span_ctx = None
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._stream, name)
@@ -143,13 +151,15 @@ class _StreamWrapper:
 class _AsyncStreamWrapper:
     """Wraps a Gemini async stream — accumulates chunks and writes span on close."""
 
-    def __init__(self, stream: Any, span: Any, tracer: Any, capture_content: bool) -> None:
+    def __init__(self, stream: Any, span: Any, tracer: Any, capture_content: bool, span_ctx: Any = None) -> None:
         self._stream = stream
         self._span = span
         self._tracer = tracer
         self._capture_content = capture_content
+        self._span_ctx = span_ctx
         self._chunks: list[Any] = []
         self._t0 = time.perf_counter()
+        self._finalized = False
 
     def __aiter__(self):
         return self
@@ -167,6 +177,9 @@ class _AsyncStreamWrapper:
             raise
 
     def _finalize(self) -> None:
+        if self._finalized:
+            return
+        self._finalized = True
         text_parts: list[str] = []
         function_calls: list[dict[str, Any]] = []
         usage: dict[str, int] = {}
@@ -200,6 +213,9 @@ class _AsyncStreamWrapper:
             self._span.set_metadata("token_usage", usage)
         if self._capture_content:
             self._span.set_output(output)
+        if self._span_ctx is not None:
+            self._span_ctx.__exit__(None, None, None)
+            self._span_ctx = None
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._stream, name)
@@ -269,7 +285,7 @@ class _TracedModels:
         span = span_ctx.__enter__()
         try:
             stream = self._models.generate_content_stream(model=model, contents=contents, config=config, **kwargs)
-            return _StreamWrapper(stream, span, tracer, tracer.capture_content)
+            return _StreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
         except BaseException:
             span_ctx.__exit__(*__import__("sys").exc_info())
             raise
@@ -359,7 +375,7 @@ class _TracedAsyncModels:
         span = span_ctx.__enter__()
         try:
             stream = await self._models.generate_content_stream(model=model, contents=contents, config=config, **kwargs)
-            return _AsyncStreamWrapper(stream, span, tracer, tracer.capture_content)
+            return _AsyncStreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
         except BaseException:
             span_ctx.__exit__(*__import__("sys").exc_info())
             raise

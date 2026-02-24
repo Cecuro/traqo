@@ -152,13 +152,15 @@ def _aggregate_stream_events(events: list[Any]) -> tuple[Any, dict[str, int], st
 class _StreamWrapper:
     """Wraps an Anthropic sync stream — accumulates events and writes span on close."""
 
-    def __init__(self, stream: Any, span: Any, tracer: Any, capture_content: bool) -> None:
+    def __init__(self, stream: Any, span: Any, tracer: Any, capture_content: bool, span_ctx: Any = None) -> None:
         self._stream = stream
         self._span = span
         self._tracer = tracer
         self._capture_content = capture_content
+        self._span_ctx = span_ctx
         self._events: list[Any] = []
         self._t0 = time.perf_counter()
+        self._finalized = False
 
     def __iter__(self):
         return self
@@ -176,12 +178,18 @@ class _StreamWrapper:
             raise
 
     def _finalize(self) -> None:
+        if self._finalized:
+            return
+        self._finalized = True
         output, usage, model = _aggregate_stream_events(self._events)
         self._span.set_metadata("model", model)
         if usage:
             self._span.set_metadata("token_usage", usage)
         if self._capture_content:
             self._span.set_output(output)
+        if self._span_ctx is not None:
+            self._span_ctx.__exit__(None, None, None)
+            self._span_ctx = None
 
     def __enter__(self):
         self._stream.__enter__()
@@ -198,13 +206,15 @@ class _StreamWrapper:
 class _AsyncStreamWrapper:
     """Wraps an Anthropic async stream — accumulates events and writes span on close."""
 
-    def __init__(self, stream: Any, span: Any, tracer: Any, capture_content: bool) -> None:
+    def __init__(self, stream: Any, span: Any, tracer: Any, capture_content: bool, span_ctx: Any = None) -> None:
         self._stream = stream
         self._span = span
         self._tracer = tracer
         self._capture_content = capture_content
+        self._span_ctx = span_ctx
         self._events: list[Any] = []
         self._t0 = time.perf_counter()
+        self._finalized = False
 
     def __aiter__(self):
         return self
@@ -222,12 +232,18 @@ class _AsyncStreamWrapper:
             raise
 
     def _finalize(self) -> None:
+        if self._finalized:
+            return
+        self._finalized = True
         output, usage, model = _aggregate_stream_events(self._events)
         self._span.set_metadata("model", model)
         if usage:
             self._span.set_metadata("token_usage", usage)
         if self._capture_content:
             self._span.set_output(output)
+        if self._span_ctx is not None:
+            self._span_ctx.__exit__(None, None, None)
+            self._span_ctx = None
 
     async def __aenter__(self):
         await self._stream.__aenter__()
@@ -275,7 +291,7 @@ class _TracedMessages:
             span = span_ctx.__enter__()
             try:
                 stream = self._messages.create(**kwargs)
-                return _StreamWrapper(stream, span, tracer, tracer.capture_content)
+                return _StreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
             except BaseException:
                 span_ctx.__exit__(*__import__("sys").exc_info())
                 raise
@@ -357,7 +373,7 @@ class _TracedAsyncMessages:
             span = span_ctx.__enter__()
             try:
                 stream = await self._messages.create(**kwargs)
-                return _AsyncStreamWrapper(stream, span, tracer, tracer.capture_content)
+                return _AsyncStreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
             except BaseException:
                 span_ctx.__exit__(*__import__("sys").exc_info())
                 raise
