@@ -6,7 +6,7 @@ Structured tracing for applications. JSONL files, hierarchical spans, zero infra
 from traqo import Tracer, trace
 from pathlib import Path
 
-@trace()
+@trace
 def classify(text: str) -> str:
     response = llm.chat(text)
     return response
@@ -33,6 +33,7 @@ pip install traqo                   # Core (zero dependencies)
 pip install traqo[openai]           # + OpenAI integration
 pip install traqo[anthropic]        # + Anthropic integration
 pip install traqo[langchain]        # + LangChain integration
+pip install traqo[gemini]           # + Google Gemini integration
 pip install traqo[all]              # Everything
 ```
 
@@ -44,12 +45,12 @@ pip install traqo[all]              # Everything
 from traqo import Tracer, trace
 from pathlib import Path
 
-@trace()
+@trace
 def summarize(text: str) -> str:
     # your logic here
     return summary
 
-@trace()
+@trace
 def pipeline(docs: list[str]) -> list[str]:
     return [summarize(doc) for doc in docs]
 
@@ -62,7 +63,7 @@ with Tracer(
     tracer.set_output({"count": len(results)})
 ```
 
-`@trace()` works with `async def` and `async with` too — it detects and handles both automatically.
+`@trace` works with sync/async functions and generators. It detects and handles all automatically.
 
 ### 2. Auto-trace LLM calls
 
@@ -78,42 +79,48 @@ response = client.chat.completions.create(
 # Token usage, model, input/output all captured automatically as span metadata
 ```
 
-Works the same way for Anthropic and LangChain:
+Works the same way for Anthropic, Gemini, and LangChain:
 
 ```python
 from traqo.integrations.anthropic import traced_anthropic
+from traqo.integrations.gemini import traced_gemini
 from traqo.integrations.langchain import traced_model
 ```
+
+All integrations auto-capture token usage, model parameters, streaming with TTFT, and tool calls.
 
 ### 3. Use metadata, tags, and kind
 
 ```python
+from traqo import Tracer, LLM, TOOL
+
 with Tracer(Path("traces/run.jsonl"), tags=["prod"]) as tracer:
     with tracer.span(
         "classify",
         input={"text": "Is this a bug?"},
         metadata={"model": "gpt-4o", "provider": "openai"},
         tags=["llm"],
-        kind="llm",
+        kind=LLM,
     ) as span:
         result = call_llm(...)
         span.set_metadata("token_usage", {"input_tokens": 100, "output_tokens": 50})
         span.set_output(result)
 ```
 
+Kind constants: `LLM`, `TOOL`, `RETRIEVER`, `CHAIN`, `AGENT`, `EMBEDDING`, `GUARDRAIL` (or use any string).
+
 ### 4. Access the current span from anywhere
 
 ```python
-from traqo import trace, get_current_span
+from traqo import trace, update_current_span
 
-@trace()
+@trace
 def classify(text: str) -> str:
-    span = get_current_span()
-    if span:
-        span.set_metadata("confidence", 0.95)
-        span.set_metadata("model", "gpt-4o")
+    update_current_span(metadata={"confidence": 0.95, "model": "gpt-4o"})
     return result
 ```
+
+`update_current_span()` is a convenience helper — no-op when no span is active. For full control, use `get_current_span()` directly.
 
 ### 5. Read your traces
 
@@ -172,7 +179,7 @@ with Tracer(
 | `metadata` | `dict` | `{}` | Arbitrary metadata written to `trace_start`. |
 | `tags` | `list[str]` | `[]` | Tags for filtering/categorization, written to `trace_start`. |
 | `thread_id` | `str` | `None` | Conversation/thread grouping ID, written to `trace_start`. |
-| `capture_content` | `bool` | `True` | If `False`, integration wrappers (OpenAI, Anthropic, LangChain) omit LLM message inputs/outputs. The `@trace` decorator has separate `capture_input`/`capture_output` flags. |
+| `capture_content` | `bool` | `True` | If `False`, integration wrappers omit LLM message inputs/outputs. The `@trace` decorator has separate `capture_input`/`capture_output` flags. |
 | `backends` | `list[Backend]` | `None` | Storage backends notified on events and trace completion. The local JSONL file is always written regardless. |
 
 **Methods:**
@@ -202,38 +209,42 @@ with tracer.span("my_step", input=data, tags=["important"], kind="tool") as span
 | `set_metadata(key, value)` | Set a metadata key |
 | `update_metadata(dict)` | Merge a dict into metadata |
 
-### `@trace(name=None, *, capture_input=True, capture_output=True, metadata=None, tags=None, kind=None)`
+### `@trace`
 
-Decorator that wraps a function in a span. Works with sync and async functions.
+Decorator that wraps a function in a span. Works with sync/async functions and generators.
 
 ```python
-@trace()
-async def my_step(data: list) -> dict:
+@trace
+def my_step(data: list) -> dict:
     return process(data)
 
-@trace("custom_name", capture_input=False, kind="tool")
+@trace("custom_name", capture_input=False, kind=TOOL)
 def sensitive_step(secret: str) -> str:
     return handle(secret)
 
-@trace(metadata={"component": "auth"}, tags=["auth"], kind="tool")
-def login(user: str) -> bool:
-    return authenticate(user)
+@trace(ignore_arguments=["password"], kind=TOOL)
+def login(user: str, password: str) -> bool:
+    return authenticate(user, password)
 ```
+
+Parameters: `name`, `capture_input`, `capture_output`, `ignore_arguments`, `metadata`, `tags`, `kind`.
 
 When no tracer is active, `@trace` is a pure passthrough with zero overhead.
 
 ### `get_current_span() -> Span | None`
 
-Returns the current active span, or `None`. Use inside `@trace`-decorated functions to set metadata dynamically.
+Returns the current active span, or `None`.
+
+### `update_current_span(*, output=, metadata=, tags=, **kw_metadata)`
+
+Convenience helper to update the active span. No-op when no span is active.
 
 ```python
-from traqo import trace, get_current_span
+from traqo import trace, update_current_span
 
-@trace()
+@trace
 def my_function(text: str) -> str:
-    span = get_current_span()
-    if span:
-        span.set_metadata("custom_key", "custom_value")
+    update_current_span(metadata={"custom_key": "custom_value"})
     return process(text)
 ```
 

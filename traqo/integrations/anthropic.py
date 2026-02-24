@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import time
 from typing import Any
 
@@ -161,17 +162,25 @@ class _StreamWrapper:
         self._events: list[Any] = []
         self._t0 = time.perf_counter()
         self._finalized = False
+        self._got_first_text = False
 
     def __iter__(self):
         return self
+
+    def _check_ttft(self, event: Any) -> None:
+        if self._got_first_text:
+            return
+        delta = getattr(event, "delta", None)
+        if delta and getattr(delta, "type", "") == "text_delta":
+            self._got_first_text = True
+            ttft = time.perf_counter() - self._t0
+            self._span.set_metadata("time_to_first_token_s", round(ttft, 3))
 
     def __next__(self):
         try:
             event = next(self._stream)
             self._events.append(event)
-            if len(self._events) == 1:
-                ttft = time.perf_counter() - self._t0
-                self._span.set_metadata("time_to_first_token_s", round(ttft, 3))
+            self._check_ttft(event)
             return event
         except StopIteration:
             self._finalize()
@@ -215,17 +224,25 @@ class _AsyncStreamWrapper:
         self._events: list[Any] = []
         self._t0 = time.perf_counter()
         self._finalized = False
+        self._got_first_text = False
 
     def __aiter__(self):
         return self
+
+    def _check_ttft(self, event: Any) -> None:
+        if self._got_first_text:
+            return
+        delta = getattr(event, "delta", None)
+        if delta and getattr(delta, "type", "") == "text_delta":
+            self._got_first_text = True
+            ttft = time.perf_counter() - self._t0
+            self._span.set_metadata("time_to_first_token_s", round(ttft, 3))
 
     async def __anext__(self):
         try:
             event = await self._stream.__anext__()
             self._events.append(event)
-            if len(self._events) == 1:
-                ttft = time.perf_counter() - self._t0
-                self._span.set_metadata("time_to_first_token_s", round(ttft, 3))
+            self._check_ttft(event)
             return event
         except StopAsyncIteration:
             self._finalize()
@@ -293,7 +310,7 @@ class _TracedMessages:
                 stream = self._messages.create(**kwargs)
                 return _StreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
             except BaseException:
-                span_ctx.__exit__(*__import__("sys").exc_info())
+                span_ctx.__exit__(*sys.exc_info())
                 raise
         else:
             with tracer.span(
@@ -334,9 +351,9 @@ class _TracedMessages:
         span = span_ctx.__enter__()
         try:
             stream = self._messages.stream(**kwargs)
-            return _StreamWrapper(stream, span, tracer, tracer.capture_content)
+            return _StreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
         except BaseException:
-            span_ctx.__exit__(*__import__("sys").exc_info())
+            span_ctx.__exit__(*sys.exc_info())
             raise
 
     def __getattr__(self, name: str) -> Any:
@@ -375,7 +392,7 @@ class _TracedAsyncMessages:
                 stream = await self._messages.create(**kwargs)
                 return _AsyncStreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
             except BaseException:
-                span_ctx.__exit__(*__import__("sys").exc_info())
+                span_ctx.__exit__(*sys.exc_info())
                 raise
         else:
             with tracer.span(
@@ -416,9 +433,9 @@ class _TracedAsyncMessages:
         span = span_ctx.__enter__()
         try:
             stream = await self._messages.stream(**kwargs)
-            return _AsyncStreamWrapper(stream, span, tracer, tracer.capture_content)
+            return _AsyncStreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
         except BaseException:
-            span_ctx.__exit__(*__import__("sys").exc_info())
+            span_ctx.__exit__(*sys.exc_info())
             raise
 
     def __getattr__(self, name: str) -> Any:

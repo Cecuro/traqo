@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import time
 from typing import Any
 
@@ -41,10 +42,10 @@ def _extract_usage(response: Any) -> dict[str, int]:
     usage: dict[str, int] = {}
     prompt_tokens = getattr(usage_meta, "prompt_token_count", None)
     candidates_tokens = getattr(usage_meta, "candidates_token_count", None)
-    if prompt_tokens is not None:
-        usage["input_tokens"] = prompt_tokens
-    if candidates_tokens is not None:
-        usage["output_tokens"] = candidates_tokens
+    if isinstance(prompt_tokens, (int, float)):
+        usage["input_tokens"] = int(prompt_tokens)
+    if isinstance(candidates_tokens, (int, float)):
+        usage["output_tokens"] = int(candidates_tokens)
     return usage
 
 
@@ -287,7 +288,7 @@ class _TracedModels:
             stream = self._models.generate_content_stream(model=model, contents=contents, config=config, **kwargs)
             return _StreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
         except BaseException:
-            span_ctx.__exit__(*__import__("sys").exc_info())
+            span_ctx.__exit__(*sys.exc_info())
             raise
 
     def embed_content(self, *, model: str = "", contents: Any = None, **kwargs: Any) -> Any:
@@ -309,6 +310,9 @@ class _TracedModels:
             kind="embedding",
         ) as span:
             response = self._models.embed_content(model=model, contents=contents, **kwargs)
+            usage = _extract_usage(response)
+            if usage:
+                span.set_metadata("token_usage", usage)
             return response
 
     def __getattr__(self, name: str) -> Any:
@@ -377,7 +381,7 @@ class _TracedAsyncModels:
             stream = await self._models.generate_content_stream(model=model, contents=contents, config=config, **kwargs)
             return _AsyncStreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
         except BaseException:
-            span_ctx.__exit__(*__import__("sys").exc_info())
+            span_ctx.__exit__(*sys.exc_info())
             raise
 
     def __getattr__(self, name: str) -> Any:

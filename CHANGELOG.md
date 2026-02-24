@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.3.0 (2026-02-24)
+
+### Added
+- **Gemini integration** — `traced_gemini()` wraps Google GenAI clients (generate_content, streaming, embeddings)
+- **OpenAI Responses API** — `traced_openai()` now traces `client.responses.create()`
+- **OpenAI embeddings** — `traced_openai()` now traces `client.embeddings.create()`
+- **Bare `@trace`** — use `@trace` without parentheses (equivalent to `@trace()`)
+- **`update_current_span()`** — convenience helper to update span metadata/output/tags from anywhere
+- **Span kind constants** — `LLM`, `TOOL`, `RETRIEVER`, `CHAIN`, `AGENT`, `EMBEDDING`, `GUARDRAIL`
+- **`ignore_arguments`** on `@trace` — exclude sensitive args from captured input
+- **Generator support** — `@trace` works with sync generators and async generators
+- **Streaming support** — all integrations handle streaming with time-to-first-token (TTFT) tracking
+- **Model parameters** — integrations capture temperature, max_tokens, etc. in span metadata
+- **Storage backends** — `LocalBackend`, `S3Backend`, `GCSBackend` for uploading traces
+
+### Fixed
+- Anthropic streaming TTFT now correctly measures first text token (not first event)
+- Anthropic `.stream()` context manager properly closes spans
+- Thread safety for stats counters
+- Gemini embed_content validates token counts are numeric
+
+### Changed
+- Child tracers use direct parent references instead of monkey-patching `__enter__`/`__exit__`
+
 ## 0.2.0 (2026-02-21)
 
 **Breaking changes** — everything is a span.

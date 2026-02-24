@@ -12,6 +12,7 @@ try:
     from langchain_core.language_models.chat_models import BaseChatModel
     from langchain_core.messages import AIMessage, BaseMessage, ChatMessage
     from langchain_core.outputs import ChatGeneration, ChatResult, LLMResult
+    from pydantic import ConfigDict
 except ImportError:
     raise ImportError(
         "LangChain not installed. Install with: pip install traqo[langchain]"
@@ -742,8 +743,7 @@ class TracedChatModel(BaseChatModel):
     wrapped: BaseChatModel
     operation: str = ""
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @property
     def _llm_type(self) -> str:

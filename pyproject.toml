@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "traqo"
-version = "0.2.0"
+version = "0.3.0"
 description = "Structured tracing for applications. JSONL files, hierarchical spans, zero infrastructure."
 requires-python = ">=3.10"
 license = "MIT"
@@ -29,9 +29,10 @@ dependencies = []
 langchain = ["langchain-core>=0.3"]
 openai = ["openai>=1.0"]
 anthropic = ["anthropic>=0.40"]
+gemini = ["google-genai>=1.0"]
 s3 = ["boto3>=1.28"]
 gcs = ["google-cloud-storage>=2.10"]
-all = ["traqo[langchain,openai,anthropic,s3,gcs]"]
+all = ["traqo[langchain,openai,anthropic,gemini,s3,gcs]"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.24"]
 
 [project.scripts]

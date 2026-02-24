@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 import uuid
 from collections.abc import Sequence
@@ -147,6 +148,10 @@ class Tracer:
         self._stats_output_tokens = 0
         self._children: list[dict[str, Any]] = []
 
+        # Child tracer linkage (set by child())
+        self._parent: Tracer | None = None
+        self._child_name: str = ""
+
     @property
     def capture_content(self) -> bool:
         """Whether content capture is enabled for this tracer."""
@@ -162,16 +167,19 @@ class Tracer:
 
     def record_span(self) -> None:
         """Increment the span counter. For use by integrations."""
-        self._stats_spans += 1
+        with self._lock:
+            self._stats_spans += 1
 
     def record_error(self) -> None:
         """Increment the error counter. For use by integrations."""
-        self._stats_errors += 1
+        with self._lock:
+            self._stats_errors += 1
 
     def record_tokens(self, input_tokens: int = 0, output_tokens: int = 0) -> None:
         """Accumulate token counts. For use by integrations."""
-        self._stats_input_tokens += input_tokens
-        self._stats_output_tokens += output_tokens
+        with self._lock:
+            self._stats_input_tokens += input_tokens
+            self._stats_output_tokens += output_tokens
 
     def _open(self) -> None:
         if self._disabled:
@@ -229,8 +237,9 @@ class Tracer:
         """If span metadata contains token_usage, accumulate into tracer stats."""
         token_usage = span_obj.metadata.get("token_usage")
         if token_usage and isinstance(token_usage, dict):
-            self._stats_input_tokens += token_usage.get("input_tokens", 0)
-            self._stats_output_tokens += token_usage.get("output_tokens", 0)
+            with self._lock:
+                self._stats_input_tokens += token_usage.get("input_tokens", 0)
+                self._stats_output_tokens += token_usage.get("output_tokens", 0)
 
     def __enter__(self) -> Tracer:
         self._open()
@@ -250,9 +259,13 @@ class Tracer:
         if self._thread_id is not None:
             start_event["thread_id"] = self._thread_id
         self._write(start_event)
+        if self._parent is not None:
+            self._parent._write_child_started(self._child_name, self._path)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        if self._parent is not None:
+            self._parent._write_child_ended(self._child_name, self)
         duration = (
             (datetime.now(timezone.utc) - self._start_time).total_seconds()
             if self._start_time
@@ -290,7 +303,8 @@ class Tracer:
 
     def log(self, name: str, data: dict[str, Any] | None = None) -> None:
         """Write a custom event."""
-        self._stats_events += 1
+        with self._lock:
+            self._stats_events += 1
         self._write(
             {
                 "type": "event",
@@ -353,8 +367,9 @@ class Tracer:
             yield span_obj
         except BaseException:
             duration = (datetime.now(timezone.utc) - start).total_seconds()
-            self._stats_spans += 1
-            self._stats_errors += 1
+            with self._lock:
+                self._stats_spans += 1
+                self._stats_errors += 1
             try:
                 self._accumulate_tokens(span_obj)
                 end_event: dict[str, Any] = {
@@ -365,7 +380,7 @@ class Tracer:
                     "ts": _now(),
                     "duration_s": round(duration, 3),
                     "status": "error",
-                    "error": serialize_error(__import__("sys").exc_info()[1]),
+                    "error": serialize_error(sys.exc_info()[1]),
                 }
                 if kind is not None:
                     end_event["kind"] = kind
@@ -381,7 +396,8 @@ class Tracer:
             _pop_span()
 
         duration = (datetime.now(timezone.utc) - start).total_seconds()
-        self._stats_spans += 1
+        with self._lock:
+            self._stats_spans += 1
         self._accumulate_tokens(span_obj)
         end_event: dict[str, Any] = {
             "type": "span_end",
@@ -413,8 +429,8 @@ class Tracer:
             capture_content=self._capture_content,
             backends=self._backends,
         )
-        child_tracer._parent = self
-        child_tracer._child_name = name
+        child_tracer._parent = self  # noqa: SLF001
+        child_tracer._child_name = name  # noqa: SLF001
         return child_tracer
 
     def _write_child_started(self, name: str, path: Path) -> None:
@@ -428,7 +444,8 @@ class Tracer:
                 "data": {"child_name": name, "child_path": str(path)},
             }
         )
-        self._stats_events += 1
+        with self._lock:
+            self._stats_events += 1
 
     def _write_child_ended(self, name: str, child: Tracer) -> None:
         summary = {
@@ -460,43 +477,9 @@ class Tracer:
                 },
             }
         )
-        self._stats_events += 1
+        with self._lock:
+            self._stats_events += 1
 
-
-# Child tracer enter/exit hooks
-_original_enter = Tracer.__enter__
-_original_exit = Tracer.__exit__
-
-
-def _child_enter(self: Tracer) -> Tracer:
-    result = _original_enter(self)
-    parent = getattr(self, "_parent", None)
-    if parent is not None:
-        parent._write_child_started(self._child_name, self._path)
-    return result
-
-
-def _child_exit(self: Tracer, exc_type, exc_val, exc_tb):
-    parent = getattr(self, "_parent", None)
-    if parent is not None:
-        parent._write_child_ended(self._child_name, self)
-    return _original_exit(self, exc_type, exc_val, exc_tb)
-
-
-Tracer.__enter__ = _child_enter
-Tracer.__exit__ = _child_exit
-
-
-async def _child_aenter(self: Tracer) -> Tracer:
-    return _child_enter(self)
-
-
-async def _child_aexit(self: Tracer, exc_type, exc_val, exc_tb):
-    return _child_exit(self, exc_type, exc_val, exc_tb)
-
-
-Tracer.__aenter__ = _child_aenter
-Tracer.__aexit__ = _child_aexit
 
 
 # ---------------------------------------------------------------------------

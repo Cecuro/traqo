@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import time
 from typing import Any
 
@@ -458,7 +459,7 @@ class _TracedCompletions:
                 stream = self._completions.create(**kwargs)
                 return _StreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
             except BaseException:
-                span_ctx.__exit__(*__import__("sys").exc_info())
+                span_ctx.__exit__(*sys.exc_info())
                 raise
         else:
             with tracer.span(
@@ -514,7 +515,7 @@ class _TracedAsyncCompletions:
                 stream = await self._completions.create(**kwargs)
                 return _AsyncStreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
             except BaseException:
-                span_ctx.__exit__(*__import__("sys").exc_info())
+                span_ctx.__exit__(*sys.exc_info())
                 raise
         else:
             with tracer.span(
@@ -670,7 +671,7 @@ class _TracedResponses:
                 stream = self._responses.create(**kwargs)
                 return _ResponsesStreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
             except BaseException:
-                span_ctx.__exit__(*__import__("sys").exc_info())
+                span_ctx.__exit__(*sys.exc_info())
                 raise
         else:
             with tracer.span(
@@ -736,7 +737,7 @@ class _TracedAsyncResponses:
                 stream = await self._responses.create(**kwargs)
                 return _AsyncResponsesStreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
             except BaseException:
-                span_ctx.__exit__(*__import__("sys").exc_info())
+                span_ctx.__exit__(*sys.exc_info())
                 raise
         else:
             with tracer.span(
