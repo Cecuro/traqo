@@ -1,7 +1,12 @@
 """Minimal HTTP server for the traqo trace viewer.
 
 Usage:
-    python -m traqo.ui [TRACES_DIR] [--port PORT]
+    python -m traqo.ui [TRACES_DIR_OR_URI] [--port PORT]
+
+Supports local directories, S3, and GCS:
+    traqo ui ./local/traces
+    traqo ui s3://my-bucket/traces/
+    traqo ui gs://my-bucket/traces/
 """
 
 from __future__ import annotations
@@ -14,6 +19,8 @@ from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
+from traqo.ui.sources import TraceSource, parse_source
+
 MIME_TYPES = {
     ".html": "text/html",
     ".css": "text/css",
@@ -23,56 +30,6 @@ MIME_TYPES = {
     ".png": "image/png",
     ".ico": "image/x-icon",
 }
-
-
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    """Read a JSONL file and return list of parsed events."""
-    events: list[dict[str, Any]] = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                try:
-                    events.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
-    return events
-
-
-def _read_first_last(path: Path) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    """Read only the first and last lines of a JSONL file for fast summary."""
-    first = None
-    last = None
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                parsed = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if first is None:
-                first = parsed
-            last = parsed
-    return first, last
-
-
-def _trace_summary(path: Path, first: dict[str, Any] | None, last: dict[str, Any] | None) -> dict[str, Any]:
-    """Extract summary info from a trace's first/last events."""
-    summary: dict[str, Any] = {"file": str(path.name)}
-
-    if first and first.get("type") == "trace_start":
-        summary["ts"] = first.get("ts")
-        summary["input"] = first.get("input")
-        summary["tags"] = first.get("tags", [])
-        summary["thread_id"] = first.get("thread_id")
-
-    if last and last.get("type") == "trace_end":
-        summary["duration_s"] = last.get("duration_s")
-        summary["stats"] = last.get("stats", {})
-
-    return summary
 
 
 def _static_mtime(static_dir: Path) -> float:
@@ -91,8 +48,8 @@ _RELOAD_SCRIPT = """
 """
 
 
-def _make_handler(traces_dir: Path, static_dir: Path, *, dev: bool = False):
-    """Create a request handler class bound to the given directories."""
+def _make_handler(source: TraceSource, static_dir: Path, *, dev: bool = False):
+    """Create a request handler class bound to the given source."""
 
     class TraqoHandler(SimpleHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -153,36 +110,19 @@ def _make_handler(traces_dir: Path, static_dir: Path, *, dev: bool = False):
             self.wfile.write(body)
 
         def _handle_traces_list(self) -> None:
-            jsonl_files = sorted(traces_dir.rglob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
-            summaries = []
-            for f in jsonl_files:
-                try:
-                    first, last = _read_first_last(f)
-                    summary = _trace_summary(f, first, last)
-                    summary["file"] = str(f.relative_to(traces_dir))
-                    summaries.append(summary)
-                except Exception:
-                    continue
-            self._json_response(summaries)
+            summaries = source.list_traces()
+            self._json_response([s.to_dict() for s in summaries])
 
         def _handle_trace_detail(self, file_param: str | None) -> None:
             if not file_param:
                 self._json_response({"error": "Missing ?file= parameter"}, 400)
                 return
 
-            target = (traces_dir / file_param).resolve()
-            # Security: ensure the file is within traces_dir
-            try:
-                target.relative_to(traces_dir.resolve())
-            except ValueError:
-                self._json_response({"error": "Path traversal not allowed"}, 403)
-                return
-
-            if not target.is_file():
+            events = source.read_all(file_param)
+            if not events:
                 self._json_response({"error": f"File not found: {file_param}"}, 404)
                 return
 
-            events = _read_jsonl(target)
             self._json_response({"file": file_param, "events": events})
 
         def log_message(self, format: str, *args: Any) -> None:
@@ -194,27 +134,33 @@ def _make_handler(traces_dir: Path, static_dir: Path, *, dev: bool = False):
 
 
 def serve(
-    traces_dir: str | Path,
+    source_uri: str | Path,
     port: int = 7600,
     *,
     dev: bool = False,
     static_dir: str | Path | None = None,
 ) -> None:
     """Start the traqo trace viewer server."""
-    traces_path = Path(traces_dir).resolve()
-    if not traces_path.is_dir():
-        print(f"Error: {traces_path} is not a directory", file=sys.stderr)
-        sys.exit(1)
+    uri = str(source_uri)
+
+    # For local paths, validate the directory exists
+    if not uri.startswith("s3://") and not uri.startswith("gs://"):
+        local_path = Path(uri).resolve()
+        if not local_path.is_dir():
+            print(f"Error: {local_path} is not a directory", file=sys.stderr)
+            sys.exit(1)
+
+    source = parse_source(uri)
 
     static_path = Path(static_dir).resolve() if static_dir else Path(__file__).parent / "static"
     if not static_path.is_dir():
         print(f"Error: static dir {static_path} not found", file=sys.stderr)
         sys.exit(1)
 
-    handler = _make_handler(traces_path, static_path, dev=dev)
+    handler = _make_handler(source, static_path, dev=dev)
     server = HTTPServer(("127.0.0.1", port), handler)
 
-    print(f"traqo ui — serving traces from {traces_path}")
+    print(f"traqo ui — serving traces from {uri}")
     if dev:
         print(f"Hot reload enabled — serving static files from {static_path}")
     print(f"Open http://localhost:{port}")
@@ -229,12 +175,17 @@ def serve(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="traqo trace viewer")
-    parser.add_argument("traces_dir", nargs="?", default=".", help="Directory containing .jsonl trace files")
+    parser.add_argument(
+        "source",
+        nargs="?",
+        default=".",
+        help="Trace source: local directory, s3://bucket/prefix, or gs://bucket/prefix",
+    )
     parser.add_argument("--port", "-p", type=int, default=7600, help="Port to serve on (default: 7600)")
     parser.add_argument("--dev", action="store_true", help="Enable hot reload on static file changes")
     parser.add_argument("--static-dir", default=None, help="Override static file directory (for development)")
     args = parser.parse_args()
-    serve(args.traces_dir, args.port, dev=args.dev, static_dir=args.static_dir)
+    serve(args.source, args.port, dev=args.dev, static_dir=args.static_dir)
 
 
 if __name__ == "__main__":

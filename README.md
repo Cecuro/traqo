@@ -148,8 +148,12 @@ Browse and inspect traces in your browser. Zero dependencies — uses Python's b
 ```bash
 traqo ui ./traces                  # Serve traces on http://localhost:7600
 traqo ui ./traces --port 8080     # Custom port
+traqo ui s3://my-bucket/traces/   # Browse traces from S3
+traqo ui gs://my-bucket/traces/   # Browse traces from GCS
 python -m traqo ui ./traces       # Alternative invocation
 ```
+
+Cloud sources list files instantly via API, then download on click. Previously viewed traces show full summary data (duration, stats, tags) on the next page load.
 
 Features: folder navigation, search/filter, span tree with waterfall timing, JSON viewer with syntax highlighting, token usage visualization, keyboard shortcuts (Escape to go back, ? for help).
 
