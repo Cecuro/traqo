@@ -383,3 +383,37 @@ class TestGeneratorDecorator:
         start = [e for e in events if e["type"] == "span_start"][0]
         assert start["input"]["n"] == 2
         assert "secret" not in start["input"]
+
+    def test_sync_generator_error_during_iteration(self, trace_file: Path):
+        @trace()
+        def failing_gen():
+            yield 1
+            yield 2
+            raise ValueError("mid-yield error")
+
+        with Tracer(trace_file):
+            with pytest.raises(ValueError, match="mid-yield error"):
+                list(failing_gen())
+
+        events = read_events(trace_file)
+        span_end = [e for e in events if e["type"] == "span_end"][0]
+        assert span_end["status"] == "error"
+        assert span_end["error"]["type"] == "ValueError"
+        assert "mid-yield error" in span_end["error"]["message"]
+
+    async def test_async_generator_error_during_iteration(self, trace_file: Path):
+        @trace()
+        async def failing_async_gen():
+            yield 1
+            yield 2
+            raise ValueError("async mid-yield error")
+
+        async with Tracer(trace_file):
+            with pytest.raises(ValueError, match="async mid-yield error"):
+                _ = [item async for item in failing_async_gen()]
+
+        events = read_events(trace_file)
+        span_end = [e for e in events if e["type"] == "span_end"][0]
+        assert span_end["status"] == "error"
+        assert span_end["error"]["type"] == "ValueError"
+        assert "async mid-yield error" in span_end["error"]["message"]

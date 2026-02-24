@@ -3,17 +3,28 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
 
 try:
     from langchain_core.callbacks import BaseCallbackHandler
+    from langchain_core.language_models.chat_models import BaseChatModel
+    from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+    from langchain_core.outputs import ChatGeneration, ChatResult, LLMResult
 except ImportError:
     pytest.skip("langchain-core not installed", allow_module_level=True)
 
 from traqo import Tracer
-from traqo.integrations.langchain import TraqoCallback
+from traqo.integrations.langchain import (
+    TraqoCallback,
+    TracedChatModel,
+    _extract_output,
+    _message_content,
+    _parse_usage_metadata,
+)
 from tests.conftest import read_events
 
 
@@ -332,3 +343,312 @@ class TestSpanCounting:
 
             assert t._stats_errors == 2
             assert t._stats_spans == 2
+
+
+# ---------------------------------------------------------------------------
+# LLM callbacks (on_chat_model_start / on_llm_start / on_llm_end / on_llm_error)
+# ---------------------------------------------------------------------------
+
+class TestLLMCallbacks:
+    def test_chat_model_start_end_cycle(self, trace_file: Path):
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        msg = AIMessage(
+            content="Hello world",
+            usage_metadata={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+        )
+        gen = ChatGeneration(message=msg)
+        llm_result = LLMResult(generations=[[gen]])
+
+        with Tracer(trace_file):
+            cb.on_chat_model_start(
+                serialized={"kwargs": {"model_name": "gpt-4"}, "id": ["langchain", "chat_models", "ChatOpenAI"]},
+                messages=[[HumanMessage(content="Hi")]],
+                run_id=run_id,
+            )
+            cb.on_llm_end(response=llm_result, run_id=run_id)
+
+        events = read_events(trace_file)
+        starts = [e for e in events if e["type"] == "span_start" and e.get("kind") == "llm"]
+        ends = [e for e in events if e["type"] == "span_end" and e.get("kind") == "llm"]
+        trace_end = [e for e in events if e["type"] == "trace_end"][0]
+
+        assert len(starts) == 1
+        assert starts[0]["name"] == "gpt-4"
+        assert starts[0]["metadata"]["provider"] == "langchain"
+        assert starts[0]["input"][0]["role"] == "human"
+        assert starts[0]["input"][0]["content"] == "Hi"
+
+        assert len(ends) == 1
+        assert ends[0]["status"] == "ok"
+        assert ends[0]["metadata"]["token_usage"]["input_tokens"] == 10
+        assert ends[0]["metadata"]["token_usage"]["output_tokens"] == 5
+        assert ends[0]["output"] == "Hello world"
+
+        assert trace_end["stats"]["total_input_tokens"] == 10
+        assert trace_end["stats"]["total_output_tokens"] == 5
+
+    def test_chat_model_start_llm_error(self, trace_file: Path):
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(trace_file):
+            cb.on_chat_model_start(
+                serialized={"kwargs": {"model_name": "gpt-4"}, "id": ["ChatOpenAI"]},
+                messages=[[HumanMessage(content="Hi")]],
+                run_id=run_id,
+            )
+            cb.on_llm_error(error=RuntimeError("rate limited"), run_id=run_id)
+
+        events = read_events(trace_file)
+        ends = [e for e in events if e["type"] == "span_end" and e.get("kind") == "llm"]
+        assert len(ends) == 1
+        assert ends[0]["status"] == "error"
+        assert ends[0]["error"]["type"] == "RuntimeError"
+        assert "rate limited" in ends[0]["error"]["message"]
+
+    def test_llm_start_end_non_chat(self, trace_file: Path):
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        msg = AIMessage(content="Completed text")
+        gen = ChatGeneration(message=msg)
+        llm_result = LLMResult(generations=[[gen]])
+
+        with Tracer(trace_file):
+            cb.on_llm_start(
+                serialized={"kwargs": {"model_name": "text-davinci-003"}, "id": ["langchain", "llms", "OpenAI"]},
+                prompts=["Complete this: Hello"],
+                run_id=run_id,
+            )
+            cb.on_llm_end(response=llm_result, run_id=run_id)
+
+        events = read_events(trace_file)
+        starts = [e for e in events if e["type"] == "span_start" and e.get("kind") == "llm"]
+        ends = [e for e in events if e["type"] == "span_end" and e.get("kind") == "llm"]
+
+        assert len(starts) == 1
+        assert starts[0]["name"] == "text-davinci-003"
+        assert starts[0]["input"] == ["Complete this: Hello"]
+
+        assert len(ends) == 1
+        assert ends[0]["status"] == "ok"
+        assert ends[0]["output"] == "Completed text"
+
+    def test_llm_end_with_reasoning_and_cache_tokens(self, trace_file: Path):
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        msg = AIMessage(
+            content="Reasoned response",
+            usage_metadata={
+                "input_tokens": 100,
+                "output_tokens": 50,
+                "total_tokens": 150,
+                "output_token_details": {"reasoning": 20},
+                "input_token_details": {"cache_read": 30, "cache_creation": 10},
+            },
+        )
+        gen = ChatGeneration(message=msg)
+        llm_result = LLMResult(generations=[[gen]])
+
+        with Tracer(trace_file):
+            cb.on_chat_model_start(
+                serialized={"kwargs": {"model_name": "o1-preview"}, "id": ["ChatOpenAI"]},
+                messages=[[HumanMessage(content="Think")]],
+                run_id=run_id,
+            )
+            cb.on_llm_end(response=llm_result, run_id=run_id)
+
+        events = read_events(trace_file)
+        end = [e for e in events if e["type"] == "span_end" and e.get("kind") == "llm"][0]
+        usage = end["metadata"]["token_usage"]
+        assert usage["input_tokens"] == 100
+        assert usage["output_tokens"] == 50
+        assert usage["reasoning_tokens"] == 20
+        assert usage["cache_read_tokens"] == 30
+        assert usage["cache_creation_tokens"] == 10
+
+
+# ---------------------------------------------------------------------------
+# Tool callbacks (on_tool_start / on_tool_end / on_tool_error)
+# ---------------------------------------------------------------------------
+
+class TestToolCallbacks:
+    def test_tool_start_end_cycle(self, trace_file: Path):
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(trace_file):
+            cb.on_tool_start(
+                serialized={"name": "calculator"},
+                input_str="2 + 2",
+                run_id=run_id,
+            )
+            cb.on_tool_end(output="4", run_id=run_id)
+
+        events = read_events(trace_file)
+        starts = [e for e in events if e["type"] == "span_start" and e.get("kind") == "tool"]
+        ends = [e for e in events if e["type"] == "span_end" and e.get("kind") == "tool"]
+
+        assert len(starts) == 1
+        assert starts[0]["name"] == "calculator"
+        assert starts[0]["input"] == "2 + 2"
+
+        assert len(ends) == 1
+        assert ends[0]["status"] == "ok"
+        assert ends[0]["output"] == "4"
+
+    def test_tool_start_error(self, trace_file: Path):
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(trace_file):
+            cb.on_tool_start(
+                serialized={"name": "web_search"},
+                input_str="query",
+                run_id=run_id,
+            )
+            cb.on_tool_error(error=TimeoutError("search timed out"), run_id=run_id)
+
+        events = read_events(trace_file)
+        ends = [e for e in events if e["type"] == "span_end" and e.get("kind") == "tool"]
+        assert len(ends) == 1
+        assert ends[0]["status"] == "error"
+        assert ends[0]["error"]["type"] == "TimeoutError"
+        assert "search timed out" in ends[0]["error"]["message"]
+
+
+# ---------------------------------------------------------------------------
+# TracedChatModel wrapper
+# ---------------------------------------------------------------------------
+
+class _MockChatModel(BaseChatModel):
+    """Minimal BaseChatModel for testing TracedChatModel."""
+    model_name: str = "mock-model"
+
+    @property
+    def _llm_type(self) -> str:
+        return "mock"
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        msg = AIMessage(
+            content="Mock response",
+            usage_metadata={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+        )
+        gen = ChatGeneration(message=msg)
+        return ChatResult(generations=[gen])
+
+
+class TestTracedChatModel:
+    def test_generate_creates_span(self, trace_file: Path):
+        mock_model = _MockChatModel()
+        traced = TracedChatModel(wrapped=mock_model)
+
+        with Tracer(trace_file):
+            result = traced._generate([HumanMessage(content="Hi")])
+
+        assert len(result.generations) == 1
+        assert result.generations[0].message.content == "Mock response"
+
+        events = read_events(trace_file)
+        starts = [e for e in events if e["type"] == "span_start"]
+        ends = [e for e in events if e["type"] == "span_end"]
+        trace_end = [e for e in events if e["type"] == "trace_end"][0]
+
+        assert len(starts) == 1
+        assert starts[0]["kind"] == "llm"
+        assert starts[0]["metadata"]["provider"] == "langchain"
+        assert starts[0]["metadata"]["model"] == "mock-model"
+        assert starts[0]["input"][0]["role"] == "human"
+
+        assert len(ends) == 1
+        assert ends[0]["status"] == "ok"
+        assert ends[0]["output"] == "Mock response"
+        assert ends[0]["metadata"]["token_usage"]["input_tokens"] == 10
+        assert ends[0]["metadata"]["token_usage"]["output_tokens"] == 5
+
+        assert trace_end["stats"]["total_input_tokens"] == 10
+        assert trace_end["stats"]["total_output_tokens"] == 5
+
+    def test_generate_no_tracer_passthrough(self):
+        mock_model = _MockChatModel()
+        traced = TracedChatModel(wrapped=mock_model)
+
+        result = traced._generate([HumanMessage(content="Hi")])
+
+        assert len(result.generations) == 1
+        assert result.generations[0].message.content == "Mock response"
+
+
+# ---------------------------------------------------------------------------
+# Token parsing and output extraction helpers
+# ---------------------------------------------------------------------------
+
+class TestTokenParsing:
+    def test_parse_usage_metadata_dict(self):
+        meta = {
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "output_token_details": {"reasoning": 20},
+            "input_token_details": {"cache_read": 30, "cache_creation": 10},
+        }
+        usage = _parse_usage_metadata(meta)
+        assert usage["input_tokens"] == 100
+        assert usage["output_tokens"] == 50
+        assert usage["reasoning_tokens"] == 20
+        assert usage["cache_read_tokens"] == 30
+        assert usage["cache_creation_tokens"] == 10
+
+    def test_parse_usage_metadata_object(self):
+        meta = MagicMock()
+        meta.input_tokens = 20
+        meta.output_tokens = 15
+        detail_out = MagicMock()
+        detail_out.reasoning = 5
+        meta.output_token_details = detail_out
+        detail_in = MagicMock()
+        detail_in.cache_read = 3
+        detail_in.cache_creation = 0  # 0 is falsy — should not be included
+        meta.input_token_details = detail_in
+
+        usage = _parse_usage_metadata(meta)
+        assert usage["input_tokens"] == 20
+        assert usage["output_tokens"] == 15
+        assert usage["reasoning_tokens"] == 5
+        assert usage["cache_read_tokens"] == 3
+        assert "cache_creation_tokens" not in usage
+
+    def test_extract_output_text(self):
+        msg = AIMessage(content="Hello world")
+        gen = ChatGeneration(message=msg)
+        result = ChatResult(generations=[gen])
+        output = _extract_output(result)
+        assert output == "Hello world"
+
+    def test_extract_output_tool_calls(self):
+        msg = AIMessage(
+            content="",
+            tool_calls=[{"name": "search", "args": {"q": "test"}, "id": "tc1"}],
+        )
+        gen = ChatGeneration(message=msg)
+        result = ChatResult(generations=[gen])
+        output = _extract_output(result)
+        assert output == [{"name": "search", "args": {"q": "test"}}]
+
+    def test_extract_output_structured_content(self):
+        msg = AIMessage(content=[
+            {"type": "reasoning", "summary": [{"text": "thinking..."}]},
+            {"type": "text", "text": "Hello"},
+        ])
+        gen = ChatGeneration(message=msg)
+        result = ChatResult(generations=[gen])
+        output = _extract_output(result)
+        assert output == {"reasoning": "thinking...", "text": "Hello"}
