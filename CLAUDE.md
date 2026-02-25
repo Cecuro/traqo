@@ -26,6 +26,14 @@ Zero runtime dependencies — only stdlib. Storage backends (S3, GCS) are option
 - **File creation**: Don't create `.md` or `.txt` files unless explicitly requested.
 - **Simple solutions**: Prefer straightforward code over abstractions. Remove unused code immediately.
 
+## Releasing
+
+1. Bump version in **both** `pyproject.toml` and `traqo/_version.py` (they must match).
+2. Commit the version bump (`chore: bump version to X.Y.Z`).
+3. Push to `main`.
+4. Create a GitHub release with tag `vX.Y.Z` via `gh release create vX.Y.Z --title "vX.Y.Z" --notes "..."`.
+5. The `publish.yml` workflow automatically builds and publishes to PyPI when a release is published.
+
 ## Architecture
 
 traqo is a structured JSONL tracing library. It writes trace events (one JSON object per line) to local files. No server, no network, no storage costs.
