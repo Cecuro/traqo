@@ -7,10 +7,9 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import read_events
 from traqo import Tracer, get_tracer, subtrace
 from traqo.reader import LLMSpan, aggregate_tokens, iter_llm_spans
-from tests.conftest import read_events
-
 
 # ---------------------------------------------------------------------------
 # 1. child() metadata kwarg
@@ -23,7 +22,11 @@ class TestChildMetadata:
         child_path = tmp_path / "child.jsonl"
 
         with Tracer(parent_path) as parent:
-            child = parent.child("agent_a", child_path, metadata={"agent_id": "agent_a", "phase": "validation"})
+            child = parent.child(
+                "agent_a",
+                child_path,
+                metadata={"agent_id": "agent_a", "phase": "validation"},
+            )
             with child:
                 pass
 
@@ -53,7 +56,9 @@ class TestChildMetadata:
         child_path = tmp_path / "child.jsonl"
 
         with Tracer(parent_path) as parent:
-            child = parent.child("agent_a", child_path, metadata={"parent_trace": "custom"})
+            child = parent.child(
+                "agent_a", child_path, metadata={"parent_trace": "custom"}
+            )
             with child:
                 pass
 
@@ -236,13 +241,17 @@ class TestChildStatsRollup:
 
             # Child with its own spans
             child = parent.child("agent_a")
-            with child:
-                with child.span(
+            with (
+                child,
+                child.span(
                     "child_call",
-                    metadata={"token_usage": {"input_tokens": 200, "output_tokens": 100}},
+                    metadata={
+                        "token_usage": {"input_tokens": 200, "output_tokens": 100}
+                    },
                     kind="llm",
-                ):
-                    pass
+                ),
+            ):
+                pass
 
         parent_events = read_events(parent_path)
         trace_end = parent_events[-1]
@@ -276,13 +285,17 @@ class TestChildStatsRollup:
         with Tracer(parent_path) as parent:
             for i in range(3):
                 child = parent.child(f"agent_{i}")
-                with child:
-                    with child.span(
+                with (
+                    child,
+                    child.span(
                         f"call_{i}",
-                        metadata={"token_usage": {"input_tokens": 10, "output_tokens": 5}},
+                        metadata={
+                            "token_usage": {"input_tokens": 10, "output_tokens": 5}
+                        },
                         kind="llm",
-                    ):
-                        pass
+                    ),
+                ):
+                    pass
 
         parent_events = read_events(parent_path)
         trace_end = parent_events[-1]
@@ -311,9 +324,8 @@ class TestTraceEndError:
     def test_trace_end_error_on_exception(self, tmp_path: Path):
         path = tmp_path / "trace.jsonl"
 
-        with pytest.raises(ValueError, match="test error"):
-            with Tracer(path):
-                raise ValueError("test error")
+        with pytest.raises(ValueError, match="test error"), Tracer(path):
+            raise ValueError("test error")
 
         events = read_events(path)
         trace_end = events[-1]
@@ -324,9 +336,8 @@ class TestTraceEndError:
     def test_trace_end_error_includes_traceback(self, tmp_path: Path):
         path = tmp_path / "trace.jsonl"
 
-        with pytest.raises(RuntimeError):
-            with Tracer(path):
-                raise RuntimeError("crash")
+        with pytest.raises(RuntimeError), Tracer(path):
+            raise RuntimeError("crash")
 
         events = read_events(path)
         trace_end = events[-1]
@@ -342,7 +353,11 @@ class TestTraceEndError:
 def _write_trace_with_llm_spans(path: Path) -> None:
     """Write a realistic trace file with LLM spans."""
     events = [
-        {"type": "trace_start", "ts": "2025-01-01T00:00:00+00:00", "tracer_version": "0.2.0"},
+        {
+            "type": "trace_start",
+            "ts": "2025-01-01T00:00:00+00:00",
+            "tracer_version": "0.2.0",
+        },
         {
             "type": "span_start",
             "id": "span1",
@@ -466,15 +481,23 @@ class TestIterLLMSpans:
         with open(path, "w") as f:
             f.write("not json\n")
             f.write("\n")
-            f.write(json.dumps({
-                "type": "span_end",
-                "id": "s1",
-                "kind": "llm",
-                "name": "model",
-                "duration_s": 1.0,
-                "status": "ok",
-                "metadata": {"model": "test", "token_usage": {"input_tokens": 10, "output_tokens": 5}},
-            }) + "\n")
+            f.write(
+                json.dumps(
+                    {
+                        "type": "span_end",
+                        "id": "s1",
+                        "kind": "llm",
+                        "name": "model",
+                        "duration_s": 1.0,
+                        "status": "ok",
+                        "metadata": {
+                            "model": "test",
+                            "token_usage": {"input_tokens": 10, "output_tokens": 5},
+                        },
+                    }
+                )
+                + "\n"
+            )
 
         spans = list(iter_llm_spans(path))
         assert len(spans) == 1
@@ -483,15 +506,20 @@ class TestIterLLMSpans:
     def test_skips_llm_spans_without_token_usage(self, tmp_path: Path):
         path = tmp_path / "trace.jsonl"
         with open(path, "w") as f:
-            f.write(json.dumps({
-                "type": "span_end",
-                "id": "s1",
-                "kind": "llm",
-                "name": "model",
-                "duration_s": 1.0,
-                "status": "ok",
-                "metadata": {"model": "test"},
-            }) + "\n")
+            f.write(
+                json.dumps(
+                    {
+                        "type": "span_end",
+                        "id": "s1",
+                        "kind": "llm",
+                        "name": "model",
+                        "duration_s": 1.0,
+                        "status": "ok",
+                        "metadata": {"model": "test"},
+                    }
+                )
+                + "\n"
+            )
 
         spans = list(iter_llm_spans(path))
         assert len(spans) == 0
@@ -525,7 +553,10 @@ class TestAggregateTokens:
             with t.span(
                 "call",
                 kind="llm",
-                metadata={"model": "gpt-4o", "token_usage": {"input_tokens": 100, "output_tokens": 50}},
+                metadata={
+                    "model": "gpt-4o",
+                    "token_usage": {"input_tokens": 100, "output_tokens": 50},
+                },
             ):
                 pass
 

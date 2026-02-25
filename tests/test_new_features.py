@@ -3,15 +3,12 @@ TTFT tracking, model params, embeddings, Responses API, Gemini wrapper."""
 
 from __future__ import annotations
 
-import json
-import time
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
-import traqo
+from tests.conftest import read_events
 from traqo import (
     AGENT,
     CHAIN,
@@ -21,16 +18,14 @@ from traqo import (
     RETRIEVER,
     TOOL,
     Tracer,
-    get_current_span,
     trace,
     update_current_span,
 )
-from tests.conftest import read_events
-
 
 # ===================================================================
 # 1. Bare @trace decorator
 # ===================================================================
+
 
 class TestBareTrace:
     def test_bare_trace_no_parens(self, trace_file: Path):
@@ -86,8 +81,7 @@ class TestBareTrace:
 
         @trace
         def gen(n: int):
-            for i in range(n):
-                yield i
+            yield from range(n)
 
         with Tracer(trace_file):
             items = list(gen(3))
@@ -98,10 +92,10 @@ class TestBareTrace:
         assert starts[0]["name"] == "gen"
 
 
-
 # ===================================================================
 # 2. Span kind constants
 # ===================================================================
+
 
 class TestKindConstants:
     def test_constants_values(self):
@@ -130,11 +124,11 @@ class TestKindConstants:
 # 3. update_current_span convenience helper
 # ===================================================================
 
+
 class TestUpdateCurrentSpan:
     def test_update_output(self, trace_file: Path):
-        with Tracer(trace_file) as tracer:
-            with tracer.span("test_span") as span:
-                update_current_span(output="custom_output")
+        with Tracer(trace_file) as tracer, tracer.span("test_span"):
+            update_current_span(output="custom_output")
 
         events = read_events(trace_file)
         end = [e for e in events if e["type"] == "span_end"][0]
@@ -185,6 +179,7 @@ class TestUpdateCurrentSpan:
 
     def test_update_output_none(self, trace_file: Path):
         """Setting output=None should work (not be confused with 'not provided')."""
+
         @trace()
         def fn():
             update_current_span(output=None)
@@ -201,6 +196,7 @@ class TestUpdateCurrentSpan:
 # ===================================================================
 # 4. TTFT tracking (OpenAI stream wrapper, mocked)
 # ===================================================================
+
 
 class TestOpenAITTFT:
     def test_sync_stream_ttft(self, trace_file: Path):
@@ -234,7 +230,11 @@ class TestOpenAITTFT:
 
         assert len(chunks) == 2
         # Check that time_to_first_token_s was set on first chunk
-        ttft_calls = [c for c in span.set_metadata.call_args_list if c[0][0] == "time_to_first_token_s"]
+        ttft_calls = [
+            c
+            for c in span.set_metadata.call_args_list
+            if c[0][0] == "time_to_first_token_s"
+        ]
         assert len(ttft_calls) == 1
         ttft_val = ttft_calls[0][0][1]
         assert isinstance(ttft_val, float)
@@ -271,7 +271,11 @@ class TestAnthropicTTFT:
         events = list(wrapper)
 
         assert len(events) == 2
-        ttft_calls = [c for c in span.set_metadata.call_args_list if c[0][0] == "time_to_first_token_s"]
+        ttft_calls = [
+            c
+            for c in span.set_metadata.call_args_list
+            if c[0][0] == "time_to_first_token_s"
+        ]
         assert len(ttft_calls) == 1
 
 
@@ -279,17 +283,23 @@ class TestAnthropicTTFT:
 # 5. Model parameters extraction
 # ===================================================================
 
+
 class TestOpenAIModelParams:
     def test_model_params_extracted(self, trace_file: Path):
         """Model parameters should appear in span metadata."""
-        from traqo.integrations.openai import _extract_model_params, _CHAT_MODEL_PARAMS
+        from traqo.integrations.openai import _CHAT_MODEL_PARAMS, _extract_model_params
 
-        kwargs = {"temperature": 0.7, "max_tokens": 100, "top_p": 0.9, "other_thing": True}
+        kwargs = {
+            "temperature": 0.7,
+            "max_tokens": 100,
+            "top_p": 0.9,
+            "other_thing": True,
+        }
         params = _extract_model_params(kwargs, _CHAT_MODEL_PARAMS)
         assert params == {"temperature": 0.7, "max_tokens": 100, "top_p": 0.9}
 
     def test_no_model_params(self):
-        from traqo.integrations.openai import _extract_model_params, _CHAT_MODEL_PARAMS
+        from traqo.integrations.openai import _CHAT_MODEL_PARAMS, _extract_model_params
 
         kwargs = {"messages": []}
         params = _extract_model_params(kwargs, _CHAT_MODEL_PARAMS)
@@ -302,7 +312,10 @@ class TestAnthropicModelParams:
         pytest.importorskip("anthropic")
 
     def test_model_params_extracted(self):
-        from traqo.integrations.anthropic import _extract_model_params, _ANTHROPIC_MODEL_PARAMS
+        from traqo.integrations.anthropic import (
+            _ANTHROPIC_MODEL_PARAMS,
+            _extract_model_params,
+        )
 
         kwargs = {"temperature": 0.5, "max_tokens": 200, "top_k": 40}
         params = _extract_model_params(kwargs, _ANTHROPIC_MODEL_PARAMS)
@@ -312,6 +325,7 @@ class TestAnthropicModelParams:
 # ===================================================================
 # 6. OpenAI Embeddings wrapper
 # ===================================================================
+
 
 class TestOpenAIEmbeddings:
     def test_embeddings_no_tracer(self):
@@ -360,6 +374,7 @@ class TestOpenAIEmbeddings:
 # ===================================================================
 # 7. OpenAI Responses API wrapper
 # ===================================================================
+
 
 class TestOpenAIResponses:
     def test_responses_no_tracer(self):
@@ -469,11 +484,17 @@ class TestOpenAIResponses:
 
         assert len(events_received) == 2
         # Check TTFT was set
-        ttft_calls = [c for c in span.set_metadata.call_args_list if c[0][0] == "time_to_first_token_s"]
+        ttft_calls = [
+            c
+            for c in span.set_metadata.call_args_list
+            if c[0][0] == "time_to_first_token_s"
+        ]
         assert len(ttft_calls) == 1
         assert ttft_calls[0][0][1] >= 0
         # Check model was set
-        model_calls = [c for c in span.set_metadata.call_args_list if c[0][0] == "model"]
+        model_calls = [
+            c for c in span.set_metadata.call_args_list if c[0][0] == "model"
+        ]
         assert model_calls[0][0][1] == "gpt-4"
         # Check output was set
         span.set_output.assert_called_once_with("Hello world")
@@ -483,9 +504,10 @@ class TestOpenAIResponses:
 # 8. _TracedOpenAIClient property tests
 # ===================================================================
 
+
 class TestTracedOpenAIClientProperties:
     def test_has_embeddings_property(self):
-        from traqo.integrations.openai import _TracedOpenAIClient, _TracedEmbeddings
+        from traqo.integrations.openai import _TracedEmbeddings, _TracedOpenAIClient
 
         mock_client = MagicMock()
         mock_client.__class__ = type("OpenAI", (), {})
@@ -504,6 +526,7 @@ class TestTracedOpenAIClientProperties:
 # ===================================================================
 # 9. Gemini wrapper (mocked)
 # ===================================================================
+
 
 class TestGeminiExtractors:
     def test_extract_model_params_from_dict(self):
@@ -647,11 +670,17 @@ class TestGeminiTracedModels:
 
         assert len(chunks) == 2
         # Check TTFT was set on first chunk
-        ttft_calls = [c for c in span.set_metadata.call_args_list if c[0][0] == "time_to_first_token_s"]
+        ttft_calls = [
+            c
+            for c in span.set_metadata.call_args_list
+            if c[0][0] == "time_to_first_token_s"
+        ]
         assert len(ttft_calls) == 1
         assert ttft_calls[0][0][1] >= 0
         # Check token usage was set
-        usage_calls = [c for c in span.set_metadata.call_args_list if c[0][0] == "token_usage"]
+        usage_calls = [
+            c for c in span.set_metadata.call_args_list if c[0][0] == "token_usage"
+        ]
         assert usage_calls[0][0][1] == {"input_tokens": 5, "output_tokens": 10}
         # Check output was set
         span.set_output.assert_called_once_with("Hi there")
@@ -677,7 +706,7 @@ class TestGeminiTracedModels:
 
 class TestGeminiClient:
     def test_traced_gemini_proxy_structure(self):
-        from traqo.integrations.gemini import traced_gemini, _TracedModels, _TracedAio
+        from traqo.integrations.gemini import _TracedAio, _TracedModels, traced_gemini
 
         mock_client = MagicMock()
         traced = traced_gemini(mock_client)
@@ -696,6 +725,7 @@ class TestGeminiClient:
 # ===================================================================
 # 10. _extract_responses_output helper
 # ===================================================================
+
 
 class TestExtractResponsesOutput:
     def test_text_only(self):

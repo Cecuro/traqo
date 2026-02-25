@@ -8,20 +8,26 @@ from typing import Any
 
 try:
     import openai as _openai_mod
-except ImportError:
+except ImportError as err:
     raise ImportError(
         "OpenAI not installed. Install with: pip install traqo[openai]"
-    )
+    ) from err
 
 from traqo.tracer import get_tracer
 
 _CHAT_MODEL_PARAMS = (
-    "temperature", "max_tokens", "max_completion_tokens",
-    "top_p", "frequency_penalty", "presence_penalty",
+    "temperature",
+    "max_tokens",
+    "max_completion_tokens",
+    "top_p",
+    "frequency_penalty",
+    "presence_penalty",
 )
 
 
-def _extract_model_params(kwargs: dict[str, Any], param_names: tuple[str, ...]) -> dict[str, Any] | None:
+def _extract_model_params(
+    kwargs: dict[str, Any], param_names: tuple[str, ...]
+) -> dict[str, Any] | None:
     """Extract generation parameters present in kwargs."""
     params = {k: kwargs[k] for k in param_names if k in kwargs}
     return params or None
@@ -80,17 +86,20 @@ def _extract_messages(kwargs: dict[str, Any]) -> list[dict[str, Any]]:
 # Responses API helpers
 # ---------------------------------------------------------------------------
 
+
 def _extract_responses_output(response: Any) -> Any:
     """Extract text + tool calls from a Responses API response."""
     text = getattr(response, "output_text", "") or ""
     tool_calls = []
     for item in getattr(response, "output", []):
         if getattr(item, "type", "") == "function_call":
-            tool_calls.append({
-                "id": getattr(item, "call_id", ""),
-                "name": getattr(item, "name", ""),
-                "arguments": getattr(item, "arguments", ""),
-            })
+            tool_calls.append(
+                {
+                    "id": getattr(item, "call_id", ""),
+                    "name": getattr(item, "name", ""),
+                    "arguments": getattr(item, "arguments", ""),
+                }
+            )
     if tool_calls:
         return {"content": text, "tool_calls": tool_calls}
     return text
@@ -99,6 +108,7 @@ def _extract_responses_output(response: Any) -> Any:
 # ---------------------------------------------------------------------------
 # Streaming helpers
 # ---------------------------------------------------------------------------
+
 
 def _aggregate_stream_chunks(chunks: list[Any]) -> tuple[Any, dict[str, int], str]:
     """Aggregate streamed ChatCompletionChunk objects into a single result."""
@@ -161,7 +171,14 @@ def _aggregate_stream_chunks(chunks: list[Any]) -> tuple[Any, dict[str, int], st
 class _StreamWrapper:
     """Wraps an OpenAI sync stream — accumulates chunks and writes span on close."""
 
-    def __init__(self, stream: Any, span: Any, tracer: Any, capture_content: bool, span_ctx: Any = None) -> None:
+    def __init__(
+        self,
+        stream: Any,
+        span: Any,
+        tracer: Any,
+        capture_content: bool,
+        span_ctx: Any = None,
+    ) -> None:
         self._stream = stream
         self._span = span
         self._tracer = tracer
@@ -215,7 +232,14 @@ class _StreamWrapper:
 class _AsyncStreamWrapper:
     """Wraps an OpenAI async stream — accumulates chunks and writes span on close."""
 
-    def __init__(self, stream: Any, span: Any, tracer: Any, capture_content: bool, span_ctx: Any = None) -> None:
+    def __init__(
+        self,
+        stream: Any,
+        span: Any,
+        tracer: Any,
+        capture_content: bool,
+        span_ctx: Any = None,
+    ) -> None:
         self._stream = stream
         self._span = span
         self._tracer = tracer
@@ -270,10 +294,18 @@ class _AsyncStreamWrapper:
 # Responses API stream wrappers
 # ---------------------------------------------------------------------------
 
+
 class _ResponsesStreamWrapper:
     """Wraps an OpenAI Responses API sync stream."""
 
-    def __init__(self, stream: Any, span: Any, tracer: Any, capture_content: bool, span_ctx: Any = None) -> None:
+    def __init__(
+        self,
+        stream: Any,
+        span: Any,
+        tracer: Any,
+        capture_content: bool,
+        span_ctx: Any = None,
+    ) -> None:
         self._stream = stream
         self._span = span
         self._tracer = tracer
@@ -314,10 +346,13 @@ class _ResponsesStreamWrapper:
             if response:
                 usage = getattr(response, "usage", None)
                 if usage:
-                    self._span.set_metadata("token_usage", {
-                        "input_tokens": getattr(usage, "input_tokens", 0) or 0,
-                        "output_tokens": getattr(usage, "output_tokens", 0) or 0,
-                    })
+                    self._span.set_metadata(
+                        "token_usage",
+                        {
+                            "input_tokens": getattr(usage, "input_tokens", 0) or 0,
+                            "output_tokens": getattr(usage, "output_tokens", 0) or 0,
+                        },
+                    )
                 model = getattr(response, "model", "")
                 if model:
                     self._span.set_metadata("model", model)
@@ -347,7 +382,14 @@ class _ResponsesStreamWrapper:
 class _AsyncResponsesStreamWrapper:
     """Wraps an OpenAI Responses API async stream."""
 
-    def __init__(self, stream: Any, span: Any, tracer: Any, capture_content: bool, span_ctx: Any = None) -> None:
+    def __init__(
+        self,
+        stream: Any,
+        span: Any,
+        tracer: Any,
+        capture_content: bool,
+        span_ctx: Any = None,
+    ) -> None:
         self._stream = stream
         self._span = span
         self._tracer = tracer
@@ -388,10 +430,13 @@ class _AsyncResponsesStreamWrapper:
             if response:
                 usage = getattr(response, "usage", None)
                 if usage:
-                    self._span.set_metadata("token_usage", {
-                        "input_tokens": getattr(usage, "input_tokens", 0) or 0,
-                        "output_tokens": getattr(usage, "output_tokens", 0) or 0,
-                    })
+                    self._span.set_metadata(
+                        "token_usage",
+                        {
+                            "input_tokens": getattr(usage, "input_tokens", 0) or 0,
+                            "output_tokens": getattr(usage, "output_tokens", 0) or 0,
+                        },
+                    )
                 model = getattr(response, "model", "")
                 if model:
                     self._span.set_metadata("model", model)
@@ -421,6 +466,7 @@ class _AsyncResponsesStreamWrapper:
 # ---------------------------------------------------------------------------
 # Traced wrapper classes
 # ---------------------------------------------------------------------------
+
 
 class _TracedCompletions:
     def __init__(self, completions: Any, operation: str) -> None:
@@ -457,7 +503,9 @@ class _TracedCompletions:
                 if "stream_options" not in kwargs:
                     kwargs["stream_options"] = {"include_usage": True}
                 stream = self._completions.create(**kwargs)
-                return _StreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
+                return _StreamWrapper(
+                    stream, span, tracer, tracer.capture_content, span_ctx
+                )
             except BaseException:
                 span_ctx.__exit__(*sys.exc_info())
                 raise
@@ -513,7 +561,9 @@ class _TracedAsyncCompletions:
                 if "stream_options" not in kwargs:
                     kwargs["stream_options"] = {"include_usage": True}
                 stream = await self._completions.create(**kwargs)
-                return _AsyncStreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
+                return _AsyncStreamWrapper(
+                    stream, span, tracer, tracer.capture_content, span_ctx
+                )
             except BaseException:
                 span_ctx.__exit__(*sys.exc_info())
                 raise
@@ -557,6 +607,7 @@ class _TracedChat:
 # Embeddings wrapper
 # ---------------------------------------------------------------------------
 
+
 class _TracedEmbeddings:
     def __init__(self, embeddings: Any, operation: str) -> None:
         self._embeddings = embeddings
@@ -583,9 +634,12 @@ class _TracedEmbeddings:
             span.set_metadata("model", model)
             usage = getattr(response, "usage", None)
             if usage:
-                span.set_metadata("token_usage", {
-                    "input_tokens": getattr(usage, "prompt_tokens", 0) or 0,
-                })
+                span.set_metadata(
+                    "token_usage",
+                    {
+                        "input_tokens": getattr(usage, "prompt_tokens", 0) or 0,
+                    },
+                )
             return response
 
     def __getattr__(self, name: str) -> Any:
@@ -618,9 +672,12 @@ class _TracedAsyncEmbeddings:
             span.set_metadata("model", model)
             usage = getattr(response, "usage", None)
             if usage:
-                span.set_metadata("token_usage", {
-                    "input_tokens": getattr(usage, "prompt_tokens", 0) or 0,
-                })
+                span.set_metadata(
+                    "token_usage",
+                    {
+                        "input_tokens": getattr(usage, "prompt_tokens", 0) or 0,
+                    },
+                )
             return response
 
     def __getattr__(self, name: str) -> Any:
@@ -630,6 +687,7 @@ class _TracedAsyncEmbeddings:
 # ---------------------------------------------------------------------------
 # Responses API wrapper
 # ---------------------------------------------------------------------------
+
 
 class _TracedResponses:
     def __init__(self, responses: Any, operation: str) -> None:
@@ -669,7 +727,9 @@ class _TracedResponses:
             span = span_ctx.__enter__()
             try:
                 stream = self._responses.create(**kwargs)
-                return _ResponsesStreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
+                return _ResponsesStreamWrapper(
+                    stream, span, tracer, tracer.capture_content, span_ctx
+                )
             except BaseException:
                 span_ctx.__exit__(*sys.exc_info())
                 raise
@@ -685,10 +745,13 @@ class _TracedResponses:
                 span.set_metadata("model", model)
                 usage = getattr(response, "usage", None)
                 if usage:
-                    span.set_metadata("token_usage", {
-                        "input_tokens": getattr(usage, "input_tokens", 0) or 0,
-                        "output_tokens": getattr(usage, "output_tokens", 0) or 0,
-                    })
+                    span.set_metadata(
+                        "token_usage",
+                        {
+                            "input_tokens": getattr(usage, "input_tokens", 0) or 0,
+                            "output_tokens": getattr(usage, "output_tokens", 0) or 0,
+                        },
+                    )
                 if tracer.capture_content:
                     span.set_output(_extract_responses_output(response))
                 return response
@@ -735,7 +798,9 @@ class _TracedAsyncResponses:
             span = span_ctx.__enter__()
             try:
                 stream = await self._responses.create(**kwargs)
-                return _AsyncResponsesStreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
+                return _AsyncResponsesStreamWrapper(
+                    stream, span, tracer, tracer.capture_content, span_ctx
+                )
             except BaseException:
                 span_ctx.__exit__(*sys.exc_info())
                 raise
@@ -751,10 +816,13 @@ class _TracedAsyncResponses:
                 span.set_metadata("model", model)
                 usage = getattr(response, "usage", None)
                 if usage:
-                    span.set_metadata("token_usage", {
-                        "input_tokens": getattr(usage, "input_tokens", 0) or 0,
-                        "output_tokens": getattr(usage, "output_tokens", 0) or 0,
-                    })
+                    span.set_metadata(
+                        "token_usage",
+                        {
+                            "input_tokens": getattr(usage, "input_tokens", 0) or 0,
+                            "output_tokens": getattr(usage, "output_tokens", 0) or 0,
+                        },
+                    )
                 if tracer.capture_content:
                     span.set_output(_extract_responses_output(response))
                 return response
@@ -766,6 +834,7 @@ class _TracedAsyncResponses:
 # ---------------------------------------------------------------------------
 # Top-level traced client
 # ---------------------------------------------------------------------------
+
 
 class _TracedOpenAIClient:
     def __init__(self, client: Any, operation: str) -> None:

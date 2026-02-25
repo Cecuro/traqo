@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 try:
     import boto3
-except ImportError:
+except ImportError as err:
     raise ImportError(
         "boto3 is not installed. Install with: pip install traqo[s3]"
-    )
+    ) from err
 
 from traqo.backend import submit_background
 
@@ -48,7 +49,7 @@ class S3Backend:
         self._client = boto3_client or boto3.client("s3")
         self._upload_kwargs = upload_kwargs or {}
 
-    def on_event(self, event: dict[str, Any]) -> None:  # noqa: ARG002
+    def on_event(self, event: dict[str, Any]) -> None:
         pass
 
     def on_trace_complete(self, trace_path: Path) -> None:

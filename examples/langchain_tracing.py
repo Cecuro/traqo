@@ -59,14 +59,18 @@ def ask_agent(agent, question: str, callbacks: list) -> str:
 
 def demo_callback():
     print("=== Pattern 1: TraqoCallback ===")
-    trace_path = os.path.join(os.path.dirname(__file__), "traces", "agent_callback.jsonl")
+    trace_path = os.path.join(
+        os.path.dirname(__file__), "traces", "agent_callback.jsonl"
+    )
 
     llm = create_model()
     agent = create_react_agent(llm, [get_weather, get_population])
     callback = TraqoCallback()
 
     with Tracer(trace_path, input={"city": "Tokyo"}, tags=["agent"]):
-        answer = ask_agent(agent, "What's the weather and population of Tokyo?", [callback])
+        answer = ask_agent(
+            agent, "What's the weather and population of Tokyo?", [callback]
+        )
         print(f"Answer: {answer}")
 
     print(f"Trace written to: {trace_path}\n")
@@ -77,7 +81,9 @@ def demo_callback():
 
 def demo_traced_model():
     print("=== Pattern 2: traced_model ===")
-    trace_path = os.path.join(os.path.dirname(__file__), "traces", "agent_pipeline.jsonl")
+    trace_path = os.path.join(
+        os.path.dirname(__file__), "traces", "agent_pipeline.jsonl"
+    )
 
     base = create_model()
     classify_llm = traced_model(base, operation="classify")

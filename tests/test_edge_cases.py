@@ -7,20 +7,19 @@ a failing test confirms the bug is real.
 from __future__ import annotations
 
 import json
-import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
 
 from traqo.serialize import _serialize_value
-from traqo.tracer import Tracer, _active_tracer, _span_stack, get_tracer
-
+from traqo.tracer import Tracer, _span_stack, get_tracer
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _read_events(path: Path) -> list[dict]:
     events = []
@@ -83,9 +82,8 @@ class TestSlottedDataclassSerialization:
         """Slotted dataclass used as span input should appear as dict in JSONL."""
         path = tmp_path / "trace.jsonl"
         point = SlottedPoint(5, 6)
-        with Tracer(path) as tracer:
-            with tracer.span("test", input=point):
-                pass
+        with Tracer(path) as tracer, tracer.span("test", input=point):
+            pass
         events = _read_events(path)
         span_start = next(e for e in events if e["type"] == "span_start")
         assert span_start["input"] == {"x": 5, "y": 6}
@@ -197,11 +195,10 @@ class TestAbandonedSpanContext:
         assert len(stack) == 1, "Orphaned span should survive tracer exit"
 
         # Tracer 2 is contaminated: its spans get a parent_id from tracer 1
-        with Tracer(path2) as t2:
-            with t2.span("innocent") as s:
-                assert s.parent_id == orphan_id, (
-                    "Cross-tracer contamination: span in t2 has parent from t1"
-                )
+        with Tracer(path2) as t2, t2.span("innocent") as s:
+            assert s.parent_id == orphan_id, (
+                "Cross-tracer contamination: span in t2 has parent from t1"
+            )
 
         # Verify the trace file has the cross-tracer parent_id
         events = _read_events(path2)
@@ -262,8 +259,9 @@ class TestPathTraversal:
     def test_s3source_read_all_path_construction(self, tmp_path):
         """S3Source.read_all builds cache paths without traversal validation."""
         pytest.importorskip("boto3")
-        from traqo.ui.sources import S3Source
         from unittest.mock import MagicMock
+
+        from traqo.ui.sources import S3Source
 
         mock_client = MagicMock()
         source = S3Source("test-bucket", prefix="traces/", boto3_client=mock_client)
@@ -293,13 +291,13 @@ class TestPathTraversal:
 class TestLangChainCallbackRunsLeak:
     def test_runs_leak_on_missing_end_callback(self, tmp_path):
         """_runs grows if start callbacks have no matching end."""
-        lc = pytest.importorskip("langchain_core")
+        pytest.importorskip("langchain_core")
         from traqo.integrations.langchain import TraqoCallback
 
         callback = TraqoCallback()
         path = tmp_path / "trace.jsonl"
 
-        with Tracer(path) as tracer:
+        with Tracer(path):
             # Fire 50 start callbacks with no matching end
             run_ids = []
             for _ in range(50):
@@ -325,15 +323,16 @@ class TestLangChainCallbackRunsLeak:
 
     def test_runs_cleaned_on_matching_end(self, tmp_path):
         """Baseline: _runs is cleaned when end callback fires."""
-        lc = pytest.importorskip("langchain_core")
+        pytest.importorskip("langchain_core")
         from langchain_core.messages import AIMessage
-        from langchain_core.outputs import ChatGeneration, ChatResult, LLMResult
+        from langchain_core.outputs import ChatGeneration, LLMResult
+
         from traqo.integrations.langchain import TraqoCallback
 
         callback = TraqoCallback()
         path = tmp_path / "trace.jsonl"
 
-        with Tracer(path) as tracer:
+        with Tracer(path):
             rid = uuid4()
             callback.on_chat_model_start(
                 serialized={
@@ -348,9 +347,7 @@ class TestLangChainCallbackRunsLeak:
             # Now fire the matching end
             callback.on_llm_end(
                 response=LLMResult(
-                    generations=[
-                        [ChatGeneration(message=AIMessage(content="hi"))]
-                    ]
+                    generations=[[ChatGeneration(message=AIMessage(content="hi"))]]
                 ),
                 run_id=rid,
             )

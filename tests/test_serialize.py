@@ -319,7 +319,9 @@ class TestSerializeError:
             raise RuntimeError("x" * 3000)
         except RuntimeError as exc:
             result = serialize_error(exc)
-        assert len(result["traceback"]) <= 2003 + 10  # _MAX_TRACEBACK_LENGTH + "..." + margin
+        assert (
+            len(result["traceback"]) <= 2003 + 10
+        )  # _MAX_TRACEBACK_LENGTH + "..." + margin
 
 
 class TestToJson:

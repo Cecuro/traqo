@@ -10,25 +10,23 @@ from uuid import uuid4
 import pytest
 
 try:
-    from langchain_core.callbacks import BaseCallbackHandler
     from langchain_core.language_models.chat_models import BaseChatModel
     from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
     from langchain_core.outputs import ChatGeneration, ChatResult, LLMResult
 except ImportError:
     pytest.skip("langchain-core not installed", allow_module_level=True)
 
+from tests.conftest import read_events
 from traqo import Tracer
 from traqo.integrations.langchain import (
-    TraqoCallback,
     TracedChatModel,
+    TraqoCallback,
     _extract_output,
-    _is_langgraph_interrupt,
     _interrupt_value,
-    _message_content,
+    _is_langgraph_interrupt,
     _parse_usage_metadata,
     track_langgraph,
 )
-from tests.conftest import read_events
 
 
 class TestRetrieverCallbacks:
@@ -56,8 +54,16 @@ class TestRetrieverCallbacks:
             cb.on_retriever_end(documents=docs, run_id=run_id)
 
         events = read_events(trace_file)
-        starts = [e for e in events if e["type"] == "span_start" and e.get("kind") == "retriever"]
-        ends = [e for e in events if e["type"] == "span_end" and e.get("kind") == "retriever"]
+        starts = [
+            e
+            for e in events
+            if e["type"] == "span_start" and e.get("kind") == "retriever"
+        ]
+        ends = [
+            e
+            for e in events
+            if e["type"] == "span_end" and e.get("kind") == "retriever"
+        ]
 
         assert len(starts) == 1
         assert starts[0]["name"] == "FAISS"
@@ -85,7 +91,11 @@ class TestRetrieverCallbacks:
             )
 
         events = read_events(trace_file)
-        ends = [e for e in events if e["type"] == "span_end" and e.get("kind") == "retriever"]
+        ends = [
+            e
+            for e in events
+            if e["type"] == "span_end" and e.get("kind") == "retriever"
+        ]
         assert len(ends) == 1
         assert ends[0]["status"] == "error"
         assert ends[0]["error"]["type"] == "ConnectionError"
@@ -104,7 +114,11 @@ class TestRetrieverCallbacks:
             cb.on_retriever_end(documents=[], run_id=run_id)
 
         events = read_events(trace_file)
-        starts = [e for e in events if e["type"] == "span_start" and e.get("kind") == "retriever"]
+        starts = [
+            e
+            for e in events
+            if e["type"] == "span_start" and e.get("kind") == "retriever"
+        ]
         assert starts[0]["name"] == "my_retriever"
 
     def test_retriever_parent_nesting(self, trace_file: Path):
@@ -124,12 +138,20 @@ class TestRetrieverCallbacks:
                 run_id=retriever_id,
                 parent_run_id=chain_id,
             )
-            cb.on_retriever_end(documents=[], run_id=retriever_id, parent_run_id=chain_id)
+            cb.on_retriever_end(
+                documents=[], run_id=retriever_id, parent_run_id=chain_id
+            )
             cb.on_chain_end(outputs={"result": "answer"}, run_id=chain_id)
 
         events = read_events(trace_file)
-        chain_start = [e for e in events if e["type"] == "span_start" and e.get("kind") == "chain"][0]
-        retriever_start = [e for e in events if e["type"] == "span_start" and e.get("kind") == "retriever"][0]
+        chain_start = [
+            e for e in events if e["type"] == "span_start" and e.get("kind") == "chain"
+        ][0]
+        retriever_start = [
+            e
+            for e in events
+            if e["type"] == "span_start" and e.get("kind") == "retriever"
+        ][0]
         assert retriever_start["parent_id"] == chain_start["id"]
 
 
@@ -150,8 +172,12 @@ class TestChainCallbacks:
             )
 
         events = read_events(trace_file)
-        starts = [e for e in events if e["type"] == "span_start" and e.get("kind") == "chain"]
-        ends = [e for e in events if e["type"] == "span_end" and e.get("kind") == "chain"]
+        starts = [
+            e for e in events if e["type"] == "span_start" and e.get("kind") == "chain"
+        ]
+        ends = [
+            e for e in events if e["type"] == "span_end" and e.get("kind") == "chain"
+        ]
 
         assert len(starts) == 1
         assert starts[0]["name"] == "LLMChain"
@@ -177,7 +203,9 @@ class TestChainCallbacks:
             )
 
         events = read_events(trace_file)
-        ends = [e for e in events if e["type"] == "span_end" and e.get("kind") == "chain"]
+        ends = [
+            e for e in events if e["type"] == "span_end" and e.get("kind") == "chain"
+        ]
         assert len(ends) == 1
         assert ends[0]["status"] == "error"
         assert ends[0]["error"]["type"] == "ValueError"
@@ -195,7 +223,9 @@ class TestChainCallbacks:
             cb.on_chain_end(outputs={}, run_id=run_id)
 
         events = read_events(trace_file)
-        starts = [e for e in events if e["type"] == "span_start" and e.get("kind") == "chain"]
+        starts = [
+            e for e in events if e["type"] == "span_start" and e.get("kind") == "chain"
+        ]
         assert starts[0]["name"] == "CustomChain"
 
     def test_nested_chains(self, trace_file: Path):
@@ -219,8 +249,14 @@ class TestChainCallbacks:
             cb.on_chain_end(outputs={"output": "outer"}, run_id=outer_id)
 
         events = read_events(trace_file)
-        outer_start = [e for e in events if e["type"] == "span_start" and e["name"] == "SequentialChain"][0]
-        inner_start = [e for e in events if e["type"] == "span_start" and e["name"] == "LLMChain"][0]
+        outer_start = [
+            e
+            for e in events
+            if e["type"] == "span_start" and e["name"] == "SequentialChain"
+        ][0]
+        inner_start = [
+            e for e in events if e["type"] == "span_start" and e["name"] == "LLMChain"
+        ][0]
         assert inner_start["parent_id"] == outer_start["id"]
 
     def test_capture_content_false(self, trace_file: Path):
@@ -236,8 +272,12 @@ class TestChainCallbacks:
             cb.on_chain_end(outputs={"result": "sensitive"}, run_id=run_id)
 
         events = read_events(trace_file)
-        starts = [e for e in events if e["type"] == "span_start" and e.get("kind") == "chain"]
-        ends = [e for e in events if e["type"] == "span_end" and e.get("kind") == "chain"]
+        starts = [
+            e for e in events if e["type"] == "span_start" and e.get("kind") == "chain"
+        ]
+        ends = [
+            e for e in events if e["type"] == "span_end" and e.get("kind") == "chain"
+        ]
         assert "input" not in starts[0]
         assert "output" not in ends[0]
 
@@ -261,8 +301,12 @@ class TestAgentCallbacks:
             cb.on_agent_finish(finish=FakeFinish(), run_id=run_id)
 
         events = read_events(trace_file)
-        starts = [e for e in events if e["type"] == "span_start" and e.get("kind") == "agent"]
-        ends = [e for e in events if e["type"] == "span_end" and e.get("kind") == "agent"]
+        starts = [
+            e for e in events if e["type"] == "span_start" and e.get("kind") == "agent"
+        ]
+        ends = [
+            e for e in events if e["type"] == "span_end" and e.get("kind") == "agent"
+        ]
 
         assert len(starts) == 1
         assert starts[0]["name"] == "search"
@@ -271,7 +315,9 @@ class TestAgentCallbacks:
 
         assert len(ends) == 1
         assert ends[0]["status"] == "ok"
-        assert ends[0]["output"]["return_values"] == {"output": "traqo is a tracing library"}
+        assert ends[0]["output"]["return_values"] == {
+            "output": "traqo is a tracing library"
+        }
         assert "Final Answer" in ends[0]["output"]["log"]
 
     def test_agent_no_tracer(self):
@@ -286,7 +332,9 @@ class TestAgentCallbacks:
 
         # Should not raise
         cb.on_agent_action(action=FakeAction(), run_id=run_id)
-        cb.on_agent_finish(finish=type("F", (), {"return_values": {}, "log": ""})(), run_id=run_id)
+        cb.on_agent_finish(
+            finish=type("F", (), {"return_values": {}, "log": ""})(), run_id=run_id
+        )
 
 
 class TestSpanCounting:
@@ -327,7 +375,9 @@ class TestSpanCounting:
 
         with Tracer(trace_file) as t:
             cb.on_agent_action(action=FakeAction(), run_id=run_id)
-            cb.on_agent_finish(finish=type("F", (), {"return_values": {}, "log": ""})(), run_id=run_id)
+            cb.on_agent_finish(
+                finish=type("F", (), {"return_values": {}, "log": ""})(), run_id=run_id
+            )
             assert t._stats_spans == 1
 
     def test_error_increments_error_count(self, trace_file: Path):
@@ -352,6 +402,7 @@ class TestSpanCounting:
 # LLM callbacks (on_chat_model_start / on_llm_start / on_llm_end / on_llm_error)
 # ---------------------------------------------------------------------------
 
+
 class TestLLMCallbacks:
     def test_chat_model_start_end_cycle(self, trace_file: Path):
         cb = TraqoCallback()
@@ -366,14 +417,19 @@ class TestLLMCallbacks:
 
         with Tracer(trace_file):
             cb.on_chat_model_start(
-                serialized={"kwargs": {"model_name": "gpt-4"}, "id": ["langchain", "chat_models", "ChatOpenAI"]},
+                serialized={
+                    "kwargs": {"model_name": "gpt-4"},
+                    "id": ["langchain", "chat_models", "ChatOpenAI"],
+                },
                 messages=[[HumanMessage(content="Hi")]],
                 run_id=run_id,
             )
             cb.on_llm_end(response=llm_result, run_id=run_id)
 
         events = read_events(trace_file)
-        starts = [e for e in events if e["type"] == "span_start" and e.get("kind") == "llm"]
+        starts = [
+            e for e in events if e["type"] == "span_start" and e.get("kind") == "llm"
+        ]
         ends = [e for e in events if e["type"] == "span_end" and e.get("kind") == "llm"]
         trace_end = [e for e in events if e["type"] == "trace_end"][0]
 
@@ -421,14 +477,19 @@ class TestLLMCallbacks:
 
         with Tracer(trace_file):
             cb.on_llm_start(
-                serialized={"kwargs": {"model_name": "text-davinci-003"}, "id": ["langchain", "llms", "OpenAI"]},
+                serialized={
+                    "kwargs": {"model_name": "text-davinci-003"},
+                    "id": ["langchain", "llms", "OpenAI"],
+                },
                 prompts=["Complete this: Hello"],
                 run_id=run_id,
             )
             cb.on_llm_end(response=llm_result, run_id=run_id)
 
         events = read_events(trace_file)
-        starts = [e for e in events if e["type"] == "span_start" and e.get("kind") == "llm"]
+        starts = [
+            e for e in events if e["type"] == "span_start" and e.get("kind") == "llm"
+        ]
         ends = [e for e in events if e["type"] == "span_end" and e.get("kind") == "llm"]
 
         assert len(starts) == 1
@@ -458,14 +519,19 @@ class TestLLMCallbacks:
 
         with Tracer(trace_file):
             cb.on_chat_model_start(
-                serialized={"kwargs": {"model_name": "o1-preview"}, "id": ["ChatOpenAI"]},
+                serialized={
+                    "kwargs": {"model_name": "o1-preview"},
+                    "id": ["ChatOpenAI"],
+                },
                 messages=[[HumanMessage(content="Think")]],
                 run_id=run_id,
             )
             cb.on_llm_end(response=llm_result, run_id=run_id)
 
         events = read_events(trace_file)
-        end = [e for e in events if e["type"] == "span_end" and e.get("kind") == "llm"][0]
+        end = [e for e in events if e["type"] == "span_end" and e.get("kind") == "llm"][
+            0
+        ]
         usage = end["metadata"]["token_usage"]
         assert usage["input_tokens"] == 100
         assert usage["output_tokens"] == 50
@@ -477,6 +543,7 @@ class TestLLMCallbacks:
 # ---------------------------------------------------------------------------
 # Tool callbacks (on_tool_start / on_tool_end / on_tool_error)
 # ---------------------------------------------------------------------------
+
 
 class TestToolCallbacks:
     def test_tool_start_end_cycle(self, trace_file: Path):
@@ -492,8 +559,12 @@ class TestToolCallbacks:
             cb.on_tool_end(output="4", run_id=run_id)
 
         events = read_events(trace_file)
-        starts = [e for e in events if e["type"] == "span_start" and e.get("kind") == "tool"]
-        ends = [e for e in events if e["type"] == "span_end" and e.get("kind") == "tool"]
+        starts = [
+            e for e in events if e["type"] == "span_start" and e.get("kind") == "tool"
+        ]
+        ends = [
+            e for e in events if e["type"] == "span_end" and e.get("kind") == "tool"
+        ]
 
         assert len(starts) == 1
         assert starts[0]["name"] == "calculator"
@@ -516,7 +587,9 @@ class TestToolCallbacks:
             cb.on_tool_error(error=TimeoutError("search timed out"), run_id=run_id)
 
         events = read_events(trace_file)
-        ends = [e for e in events if e["type"] == "span_end" and e.get("kind") == "tool"]
+        ends = [
+            e for e in events if e["type"] == "span_end" and e.get("kind") == "tool"
+        ]
         assert len(ends) == 1
         assert ends[0]["status"] == "error"
         assert ends[0]["error"]["type"] == "TimeoutError"
@@ -527,8 +600,10 @@ class TestToolCallbacks:
 # TracedChatModel wrapper
 # ---------------------------------------------------------------------------
 
+
 class _MockChatModel(BaseChatModel):
     """Minimal BaseChatModel for testing TracedChatModel."""
+
     model_name: str = "mock-model"
 
     @property
@@ -595,6 +670,7 @@ class TestTracedChatModel:
 # Token parsing and output extraction helpers
 # ---------------------------------------------------------------------------
 
+
 class TestTokenParsing:
     def test_parse_usage_metadata_dict(self):
         meta = {
@@ -647,10 +723,12 @@ class TestTokenParsing:
         assert output == [{"name": "search", "args": {"q": "test"}}]
 
     def test_extract_output_structured_content(self):
-        msg = AIMessage(content=[
-            {"type": "reasoning", "summary": [{"text": "thinking..."}]},
-            {"type": "text", "text": "Hello"},
-        ])
+        msg = AIMessage(
+            content=[
+                {"type": "reasoning", "summary": [{"text": "thinking..."}]},
+                {"type": "text", "text": "Hello"},
+            ]
+        )
         gen = ChatGeneration(message=msg)
         result = ChatResult(generations=[gen])
         output = _extract_output(result)
@@ -661,13 +739,16 @@ class TestTokenParsing:
 # LangGraph interrupt handling
 # ---------------------------------------------------------------------------
 
+
 class GraphInterrupt(Exception):
     """Fake LangGraph GraphInterrupt for testing."""
+
     pass
 
 
 class NodeInterrupt(Exception):
     """Fake LangGraph NodeInterrupt for testing."""
+
     pass
 
 
@@ -713,7 +794,9 @@ class TestChainErrorInterruptHandling:
             )
 
         events = read_events(trace_file)
-        ends = [e for e in events if e["type"] == "span_end" and e.get("kind") == "chain"]
+        ends = [
+            e for e in events if e["type"] == "span_end" and e.get("kind") == "chain"
+        ]
         assert len(ends) == 1
         assert ends[0]["status"] == "interrupted"
         assert ends[0]["output"] == "human approval needed"
@@ -734,7 +817,9 @@ class TestChainErrorInterruptHandling:
             cb.on_chain_error(error=err, run_id=run_id)
 
         events = read_events(trace_file)
-        ends = [e for e in events if e["type"] == "span_end" and e.get("kind") == "chain"]
+        ends = [
+            e for e in events if e["type"] == "span_end" and e.get("kind") == "chain"
+        ]
         assert len(ends) == 1
         assert ends[0]["status"] == "interrupted"
         assert ends[0]["output"]["question"] == "Approve this action?"
@@ -771,7 +856,9 @@ class TestChainErrorInterruptHandling:
             )
 
         events = read_events(trace_file)
-        ends = [e for e in events if e["type"] == "span_end" and e.get("kind") == "chain"]
+        ends = [
+            e for e in events if e["type"] == "span_end" and e.get("kind") == "chain"
+        ]
         assert ends[0]["status"] == "interrupted"
         assert "output" not in ends[0]
 
@@ -790,7 +877,9 @@ class TestChainErrorInterruptHandling:
             assert t._stats_errors == 1
 
         events = read_events(trace_file)
-        ends = [e for e in events if e["type"] == "span_end" and e.get("kind") == "chain"]
+        ends = [
+            e for e in events if e["type"] == "span_end" and e.get("kind") == "chain"
+        ]
         assert ends[0]["status"] == "error"
         assert ends[0]["error"]["type"] == "ValueError"
 
@@ -798,6 +887,7 @@ class TestChainErrorInterruptHandling:
 # ---------------------------------------------------------------------------
 # track_langgraph() helper
 # ---------------------------------------------------------------------------
+
 
 class _FakeGraph:
     """Minimal mock of a compiled LangGraph for testing track_langgraph."""
@@ -809,7 +899,9 @@ class _FakeGraph:
         self.last_config = config
         return {"result": "ok"}
 
-    async def ainvoke(self, input: Any, config: dict | None = None, **kwargs: Any) -> dict:
+    async def ainvoke(
+        self, input: Any, config: dict | None = None, **kwargs: Any
+    ) -> dict:
         self.last_config = config
         return {"result": "ok"}
 

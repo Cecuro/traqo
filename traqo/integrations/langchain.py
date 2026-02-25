@@ -13,10 +13,10 @@ try:
     from langchain_core.messages import AIMessage, BaseMessage, ChatMessage
     from langchain_core.outputs import ChatGeneration, ChatResult, LLMResult
     from pydantic import ConfigDict
-except ImportError:
+except ImportError as err:
     raise ImportError(
         "LangChain not installed. Install with: pip install traqo[langchain]"
-    )
+    ) from err
 
 from traqo.serialize import serialize_error
 from traqo.tracer import _get_parent_id, _now, _uuid, get_tracer
@@ -117,7 +117,9 @@ def _message_to_dict(msg: BaseMessage) -> dict[str, Any]:
     d: dict[str, Any] = {"role": role, "content": _message_content(msg)}
     tool_calls = getattr(msg, "tool_calls", None)
     if tool_calls:
-        d["tool_calls"] = [{"name": tc["name"], "args": tc["args"]} for tc in tool_calls]
+        d["tool_calls"] = [
+            {"name": tc["name"], "args": tc["args"]} for tc in tool_calls
+        ]
     tool_call_id = getattr(msg, "tool_call_id", None)
     if tool_call_id:
         d["tool_call_id"] = tool_call_id
@@ -237,13 +239,16 @@ class TraqoCallback(BaseCallbackHandler):
             start_event["input"] = prompts
 
         tracer.write_event(start_event)
-        self._store_run(run_id, {
-            "span_id": span_id,
-            "parent_id": parent_id,
-            "name": model,
-            "start": start,
-            "metadata": meta,
-        })
+        self._store_run(
+            run_id,
+            {
+                "span_id": span_id,
+                "parent_id": parent_id,
+                "name": model,
+                "start": start,
+                "metadata": meta,
+            },
+        )
 
     def on_chat_model_start(
         self,
@@ -277,13 +282,16 @@ class TraqoCallback(BaseCallbackHandler):
             start_event["input"] = _messages_to_dicts(messages[0])
 
         tracer.write_event(start_event)
-        self._store_run(run_id, {
-            "span_id": span_id,
-            "parent_id": parent_id,
-            "name": model,
-            "start": start,
-            "metadata": meta,
-        })
+        self._store_run(
+            run_id,
+            {
+                "span_id": span_id,
+                "parent_id": parent_id,
+                "name": model,
+                "start": start,
+                "metadata": meta,
+            },
+        )
 
     def on_llm_end(
         self,
@@ -339,18 +347,20 @@ class TraqoCallback(BaseCallbackHandler):
         if not info:
             return
         duration = (datetime.now(timezone.utc) - info["start"]).total_seconds()
-        tracer.write_event({
-            "type": "span_end",
-            "id": info["span_id"],
-            "parent_id": info["parent_id"],
-            "name": info["name"],
-            "ts": _now(),
-            "duration_s": round(duration, 3),
-            "status": "error",
-            "kind": "llm",
-            "error": serialize_error(error),
-            "metadata": info["metadata"],
-        })
+        tracer.write_event(
+            {
+                "type": "span_end",
+                "id": info["span_id"],
+                "parent_id": info["parent_id"],
+                "name": info["name"],
+                "ts": _now(),
+                "duration_s": round(duration, 3),
+                "status": "error",
+                "kind": "llm",
+                "error": serialize_error(error),
+                "metadata": info["metadata"],
+            }
+        )
         tracer.record_span()
         tracer.record_error()
 
@@ -386,13 +396,16 @@ class TraqoCallback(BaseCallbackHandler):
             start_event["input"] = input_str
 
         tracer.write_event(start_event)
-        self._store_run(run_id, {
-            "span_id": span_id,
-            "parent_id": parent_id,
-            "name": name,
-            "start": start,
-            "metadata": {},
-        })
+        self._store_run(
+            run_id,
+            {
+                "span_id": span_id,
+                "parent_id": parent_id,
+                "name": name,
+                "start": start,
+                "metadata": {},
+            },
+        )
 
     def on_tool_end(
         self,
@@ -436,17 +449,19 @@ class TraqoCallback(BaseCallbackHandler):
         if not info:
             return
         duration = (datetime.now(timezone.utc) - info["start"]).total_seconds()
-        tracer.write_event({
-            "type": "span_end",
-            "id": info["span_id"],
-            "parent_id": info["parent_id"],
-            "name": info["name"],
-            "ts": _now(),
-            "duration_s": round(duration, 3),
-            "status": "error",
-            "kind": "tool",
-            "error": serialize_error(error),
-        })
+        tracer.write_event(
+            {
+                "type": "span_end",
+                "id": info["span_id"],
+                "parent_id": info["parent_id"],
+                "name": info["name"],
+                "ts": _now(),
+                "duration_s": round(duration, 3),
+                "status": "error",
+                "kind": "tool",
+                "error": serialize_error(error),
+            }
+        )
         tracer.record_span()
         tracer.record_error()
 
@@ -483,13 +498,16 @@ class TraqoCallback(BaseCallbackHandler):
             start_event["input"] = query
 
         tracer.write_event(start_event)
-        self._store_run(run_id, {
-            "span_id": span_id,
-            "parent_id": parent_id,
-            "name": name,
-            "start": start,
-            "metadata": {},
-        })
+        self._store_run(
+            run_id,
+            {
+                "span_id": span_id,
+                "parent_id": parent_id,
+                "name": name,
+                "start": start,
+                "metadata": {},
+            },
+        )
 
     def on_retriever_end(
         self,
@@ -539,17 +557,19 @@ class TraqoCallback(BaseCallbackHandler):
         if not info:
             return
         duration = (datetime.now(timezone.utc) - info["start"]).total_seconds()
-        tracer.write_event({
-            "type": "span_end",
-            "id": info["span_id"],
-            "parent_id": info["parent_id"],
-            "name": info["name"],
-            "ts": _now(),
-            "duration_s": round(duration, 3),
-            "status": "error",
-            "kind": "retriever",
-            "error": serialize_error(error),
-        })
+        tracer.write_event(
+            {
+                "type": "span_end",
+                "id": info["span_id"],
+                "parent_id": info["parent_id"],
+                "name": info["name"],
+                "ts": _now(),
+                "duration_s": round(duration, 3),
+                "status": "error",
+                "kind": "retriever",
+                "error": serialize_error(error),
+            }
+        )
         tracer.record_span()
         tracer.record_error()
 
@@ -586,13 +606,16 @@ class TraqoCallback(BaseCallbackHandler):
             start_event["input"] = inputs
 
         tracer.write_event(start_event)
-        self._store_run(run_id, {
-            "span_id": span_id,
-            "parent_id": parent_id,
-            "name": name,
-            "start": start,
-            "metadata": {},
-        })
+        self._store_run(
+            run_id,
+            {
+                "span_id": span_id,
+                "parent_id": parent_id,
+                "name": name,
+                "start": start,
+                "metadata": {},
+            },
+        )
 
     def on_chain_end(
         self,
@@ -656,17 +679,19 @@ class TraqoCallback(BaseCallbackHandler):
             tracer.record_span()
             return
 
-        tracer.write_event({
-            "type": "span_end",
-            "id": info["span_id"],
-            "parent_id": info["parent_id"],
-            "name": info["name"],
-            "ts": _now(),
-            "duration_s": round(duration, 3),
-            "status": "error",
-            "kind": "chain",
-            "error": serialize_error(error),
-        })
+        tracer.write_event(
+            {
+                "type": "span_end",
+                "id": info["span_id"],
+                "parent_id": info["parent_id"],
+                "name": info["name"],
+                "ts": _now(),
+                "duration_s": round(duration, 3),
+                "status": "error",
+                "kind": "chain",
+                "error": serialize_error(error),
+            }
+        )
         tracer.record_span()
         tracer.record_error()
 
@@ -705,13 +730,16 @@ class TraqoCallback(BaseCallbackHandler):
             }
 
         tracer.write_event(start_event)
-        self._store_run(run_id, {
-            "span_id": span_id,
-            "parent_id": parent_id,
-            "name": tool,
-            "start": start,
-            "metadata": {},
-        })
+        self._store_run(
+            run_id,
+            {
+                "span_id": span_id,
+                "parent_id": parent_id,
+                "name": tool,
+                "start": start,
+                "metadata": {},
+            },
+        )
 
     def on_agent_finish(
         self,
@@ -809,7 +837,9 @@ class TracedChatModel(BaseChatModel):
     ) -> ChatResult:
         tracer = get_tracer()
         if tracer is None:
-            return self.wrapped._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+            return self.wrapped._generate(
+                messages, stop=stop, run_manager=run_manager, **kwargs
+            )
 
         span_meta: dict[str, Any] = {
             "provider": "langchain",
@@ -825,7 +855,9 @@ class TracedChatModel(BaseChatModel):
             metadata=span_meta,
             kind="llm",
         ) as span:
-            result = self.wrapped._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+            result = self.wrapped._generate(
+                messages, stop=stop, run_manager=run_manager, **kwargs
+            )
             usage = _extract_token_usage(result)
             if usage:
                 span.set_metadata("token_usage", usage)
@@ -842,7 +874,9 @@ class TracedChatModel(BaseChatModel):
     ) -> ChatResult:
         tracer = get_tracer()
         if tracer is None:
-            return await self.wrapped._agenerate(messages, stop=stop, run_manager=run_manager, **kwargs)
+            return await self.wrapped._agenerate(
+                messages, stop=stop, run_manager=run_manager, **kwargs
+            )
 
         span_meta: dict[str, Any] = {
             "provider": "langchain",
@@ -858,7 +892,9 @@ class TracedChatModel(BaseChatModel):
             metadata=span_meta,
             kind="llm",
         ) as span:
-            result = await self.wrapped._agenerate(messages, stop=stop, run_manager=run_manager, **kwargs)
+            result = await self.wrapped._agenerate(
+                messages, stop=stop, run_manager=run_manager, **kwargs
+            )
             usage = _extract_token_usage(result)
             if usage:
                 span.set_metadata("token_usage", usage)
@@ -896,6 +932,7 @@ def track_langgraph(graph: Any, callback: TraqoCallback | None = None) -> Any:
     Example::
 
         from langgraph.prebuilt import create_react_agent
+
         agent = create_react_agent(llm, tools)
         track_langgraph(agent)
 
@@ -921,14 +958,20 @@ def track_langgraph(graph: Any, callback: TraqoCallback | None = None) -> Any:
     def invoke(input: Any, config: dict[str, Any] | None = None, **kwargs: Any) -> Any:
         return _orig_invoke(input, config=_inject_callback(config), **kwargs)
 
-    async def ainvoke(input: Any, config: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+    async def ainvoke(
+        input: Any, config: dict[str, Any] | None = None, **kwargs: Any
+    ) -> Any:
         return await _orig_ainvoke(input, config=_inject_callback(config), **kwargs)
 
     def stream(input: Any, config: dict[str, Any] | None = None, **kwargs: Any) -> Any:
         yield from _orig_stream(input, config=_inject_callback(config), **kwargs)
 
-    async def astream(input: Any, config: dict[str, Any] | None = None, **kwargs: Any) -> Any:
-        async for chunk in _orig_astream(input, config=_inject_callback(config), **kwargs):
+    async def astream(
+        input: Any, config: dict[str, Any] | None = None, **kwargs: Any
+    ) -> Any:
+        async for chunk in _orig_astream(
+            input, config=_inject_callback(config), **kwargs
+        ):
             yield chunk
 
     graph.invoke = invoke

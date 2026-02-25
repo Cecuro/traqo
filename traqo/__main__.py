@@ -20,6 +20,7 @@ def main() -> None:
     if command == "ui":
         sys.argv = sys.argv[1:]  # shift so argparse in server.py sees the right args
         from traqo.ui.server import main as ui_main
+
         ui_main()
     else:
         print(f"Unknown command: {command}", file=sys.stderr)

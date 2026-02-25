@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, PropertyMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -16,7 +16,6 @@ from traqo.ui.sources import (
     _enrich_summary,
     parse_source,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -131,9 +130,10 @@ class TestLocalSource:
         assert "b.jsonl" in keys
 
     def test_list_traces_enriched(self, tmp_path: Path):
-        _write_trace(tmp_path / "run.jsonl", _make_trace_events(
-            input_val="test", tags=["prod"], duration=2.5
-        ))
+        _write_trace(
+            tmp_path / "run.jsonl",
+            _make_trace_events(input_val="test", tags=["prod"], duration=2.5),
+        )
         source = LocalSource(tmp_path)
         traces = source.list_traces()
         assert len(traces) == 1
@@ -199,8 +199,11 @@ class TestLocalSource:
 
 
 class TestS3Source:
-    def _make_source(self, mock_client: MagicMock, bucket: str = "b", prefix: str = "traces/"):
+    def _make_source(
+        self, mock_client: MagicMock, bucket: str = "b", prefix: str = "traces/"
+    ):
         from traqo.ui.sources import S3Source
+
         return S3Source(bucket, prefix, boto3_client=mock_client)
 
     def _make_paginator(self, objects: list[dict[str, Any]]) -> MagicMock:
@@ -224,11 +227,13 @@ class TestS3Source:
             pytest.skip("boto3 not installed")
 
         now = datetime(2025, 6, 1, tzinfo=timezone.utc)
-        mock_client = self._make_paginator([
-            {"Key": "traces/run1.jsonl", "LastModified": now},
-            {"Key": "traces/run2.jsonl", "LastModified": now},
-            {"Key": "traces/readme.txt", "LastModified": now},
-        ])
+        mock_client = self._make_paginator(
+            [
+                {"Key": "traces/run1.jsonl", "LastModified": now},
+                {"Key": "traces/run2.jsonl", "LastModified": now},
+                {"Key": "traces/readme.txt", "LastModified": now},
+            ]
+        )
 
         source = self._make_source(mock_client)
         traces = source.list_traces()
@@ -245,9 +250,11 @@ class TestS3Source:
             pytest.skip("boto3 not installed")
 
         now = datetime(2025, 6, 1, tzinfo=timezone.utc)
-        mock_client = self._make_paginator([
-            {"Key": "traces/sub/deep.jsonl", "LastModified": now},
-        ])
+        mock_client = self._make_paginator(
+            [
+                {"Key": "traces/sub/deep.jsonl", "LastModified": now},
+            ]
+        )
         source = self._make_source(mock_client)
         traces = source.list_traces()
         assert traces[0].key == "sub/deep.jsonl"
@@ -273,7 +280,9 @@ class TestS3Source:
 
         assert len(result) == 2
         assert result[0]["type"] == "trace_start"
-        mock_client.download_file.assert_called_once_with("b", "traces/run.jsonl", str(source._cache_dir / "run.jsonl"))
+        mock_client.download_file.assert_called_once_with(
+            "b", "traces/run.jsonl", str(source._cache_dir / "run.jsonl")
+        )
 
     def test_read_all_uses_cache_on_second_call(self, tmp_path: Path):
         try:
@@ -348,9 +357,11 @@ class TestS3Source:
 
         events = _make_trace_events(input_val="cached", duration=5.0)
         now = datetime(2025, 6, 1, tzinfo=timezone.utc)
-        mock_client = self._make_paginator([
-            {"Key": "traces/run.jsonl", "LastModified": now},
-        ])
+        mock_client = self._make_paginator(
+            [
+                {"Key": "traces/run.jsonl", "LastModified": now},
+            ]
+        )
 
         def fake_download(bucket, key, dest):
             Path(dest).parent.mkdir(parents=True, exist_ok=True)
@@ -379,8 +390,11 @@ class TestS3Source:
 
 
 class TestGCSSource:
-    def _make_source(self, mock_client: MagicMock, bucket: str = "b", prefix: str = "traces/"):
+    def _make_source(
+        self, mock_client: MagicMock, bucket: str = "b", prefix: str = "traces/"
+    ):
         from traqo.ui.sources import GCSSource
+
         return GCSSource(bucket, prefix, gcs_client=mock_client)
 
     def _make_blob(self, name: str, updated: datetime | None = None) -> MagicMock:
@@ -558,6 +572,7 @@ class TestParseSource:
         except ImportError:
             pytest.skip("boto3 not installed")
         from traqo.ui.sources import S3Source
+
         assert isinstance(source, S3Source)
         assert source._bucket == "my-bucket"
         assert source._prefix == "prefix/path/"
@@ -568,6 +583,7 @@ class TestParseSource:
         except ImportError:
             pytest.skip("google-cloud-storage not installed")
         from traqo.ui.sources import GCSSource
+
         assert isinstance(source, GCSSource)
         assert source._bucket_name == "my-bucket"
         assert source._prefix == "traces/"
@@ -578,6 +594,7 @@ class TestParseSource:
         except ImportError:
             pytest.skip("boto3 not installed")
         from traqo.ui.sources import S3Source
+
         assert isinstance(source, S3Source)
         assert source._bucket == "my-bucket"
         assert source._prefix == ""
@@ -588,6 +605,7 @@ class TestParseSource:
         except ImportError:
             pytest.skip("google-cloud-storage not installed")
         from traqo.ui.sources import GCSSource
+
         assert isinstance(source, GCSSource)
         assert source._bucket_name == "my-bucket"
         assert source._prefix == ""

@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import functools
 import inspect
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from traqo.serialize import serialize_args, serialize_output
 from traqo.tracer import get_tracer
@@ -88,7 +89,11 @@ def trace(
                 tracer = get_tracer()
                 input_data = _make_input(args, kwargs)
                 with tracer.span(
-                    resolved_name, input=input_data, metadata=metadata, tags=tags, kind=kind
+                    resolved_name,
+                    input=input_data,
+                    metadata=metadata,
+                    tags=tags,
+                    kind=kind,
                 ) as span:
                     collected: list[Any] = []
                     async for item in func(*args, **kwargs):
@@ -110,7 +115,11 @@ def trace(
                 tracer = get_tracer()
                 input_data = _make_input(args, kwargs)
                 with tracer.span(
-                    resolved_name, input=input_data, metadata=metadata, tags=tags, kind=kind
+                    resolved_name,
+                    input=input_data,
+                    metadata=metadata,
+                    tags=tags,
+                    kind=kind,
                 ) as span:
                     collected: list[Any] = []
                     for item in func(*args, **kwargs):
@@ -131,7 +140,11 @@ def trace(
                 tracer = get_tracer()
                 input_data = _make_input(args, kwargs)
                 with tracer.span(
-                    resolved_name, input=input_data, metadata=metadata, tags=tags, kind=kind
+                    resolved_name,
+                    input=input_data,
+                    metadata=metadata,
+                    tags=tags,
+                    kind=kind,
                 ) as span:
                     result = await func(*args, **kwargs)
                     if capture_output:
@@ -150,7 +163,11 @@ def trace(
                 tracer = get_tracer()
                 input_data = _make_input(args, kwargs)
                 with tracer.span(
-                    resolved_name, input=input_data, metadata=metadata, tags=tags, kind=kind
+                    resolved_name,
+                    input=input_data,
+                    metadata=metadata,
+                    tags=tags,
+                    kind=kind,
                 ) as span:
                     result = func(*args, **kwargs)
                     if capture_output:

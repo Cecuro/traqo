@@ -5,12 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from unittest.mock import patch
 
-import pytest
-
-from traqo import Tracer, get_tracer, trace
 from tests.conftest import read_events
+from traqo import Tracer, trace
 
 
 class TestConcurrency:

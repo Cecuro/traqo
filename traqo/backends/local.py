@@ -33,7 +33,7 @@ class LocalBackend:
         self._directory = Path(directory)
         self._organize_by_date = organize_by_date
 
-    def on_event(self, event: dict[str, Any]) -> None:  # noqa: ARG002
+    def on_event(self, event: dict[str, Any]) -> None:
         pass
 
     def on_trace_complete(self, trace_path: Path) -> None:

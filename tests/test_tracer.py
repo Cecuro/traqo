@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
-from traqo import Tracer, get_current_span, get_tracer, trace
 from tests.conftest import read_events
+from traqo import Tracer, get_current_span, get_tracer, trace
 
 
 class TestTraceStartEnd:
@@ -35,7 +34,10 @@ class TestTraceStartEnd:
             with tracer.span(
                 "llm_call",
                 input=[{"role": "user", "content": "hi"}],
-                metadata={"model": "test-model", "token_usage": {"input_tokens": 10, "output_tokens": 5}},
+                metadata={
+                    "model": "test-model",
+                    "token_usage": {"input_tokens": 10, "output_tokens": 5},
+                },
                 kind="llm",
             ) as span:
                 span.set_output("hello")
@@ -105,8 +107,9 @@ class TestSpanMetadata:
     """Test span metadata — replaces the old TestLLMEvent class."""
 
     def test_span_with_llm_metadata(self, trace_file: Path):
-        with Tracer(trace_file) as tracer:
-            with tracer.span(
+        with (
+            Tracer(trace_file) as tracer,
+            tracer.span(
                 "chat",
                 input=[{"role": "user", "content": "hello"}],
                 metadata={
@@ -115,8 +118,9 @@ class TestSpanMetadata:
                     "token_usage": {"input_tokens": 10, "output_tokens": 5},
                 },
                 kind="llm",
-            ) as span:
-                span.set_output("hi there")
+            ) as span,
+        ):
+            span.set_output("hi there")
         events = read_events(trace_file)
         start = [e for e in events if e["type"] == "span_start"][0]
         end = [e for e in events if e["type"] == "span_end"][0]
@@ -124,13 +128,15 @@ class TestSpanMetadata:
         assert start["input"] == [{"role": "user", "content": "hello"}]
         assert start["metadata"]["model"] == "gpt-5-mini"
         assert end["output"] == "hi there"
-        assert end["metadata"]["token_usage"] == {"input_tokens": 10, "output_tokens": 5}
+        assert end["metadata"]["token_usage"] == {
+            "input_tokens": 10,
+            "output_tokens": 5,
+        }
 
     def test_span_metadata_set_during_execution(self, trace_file: Path):
-        with Tracer(trace_file) as tracer:
-            with tracer.span("step") as span:
-                span.set_metadata("model", "claude-4")
-                span.set_metadata("token_usage", {"input_tokens": 50, "output_tokens": 25})
+        with Tracer(trace_file) as tracer, tracer.span("step") as span:
+            span.set_metadata("model", "claude-4")
+            span.set_metadata("token_usage", {"input_tokens": 50, "output_tokens": 25})
         events = read_events(trace_file)
         end = [e for e in events if e["type"] == "span_end"][0]
         assert end["metadata"]["model"] == "claude-4"
@@ -147,9 +153,8 @@ class TestSpanMetadata:
         assert end["kind"] == "retriever"
 
     def test_kind_omitted_when_none(self, trace_file: Path):
-        with Tracer(trace_file) as tracer:
-            with tracer.span("plain_step"):
-                pass
+        with Tracer(trace_file) as tracer, tracer.span("plain_step"):
+            pass
         events = read_events(trace_file)
         start = [e for e in events if e["type"] == "span_start"][0]
         end = [e for e in events if e["type"] == "span_end"][0]
@@ -184,32 +189,31 @@ class TestSpan:
         assert end["error"]["message"] == "boom"
 
     def test_nested_spans_parent_ids(self, trace_file: Path):
-        with Tracer(trace_file) as tracer:
-            with tracer.span("outer") as outer:
-                with tracer.span("inner") as inner:
-                    pass
+        with Tracer(trace_file) as tracer, tracer.span("outer") as outer:
+            with tracer.span("inner"):
+                pass
         events = read_events(trace_file)
-        inner_start = [e for e in events if e["type"] == "span_start" and e["name"] == "inner"][0]
+        inner_start = [
+            e for e in events if e["type"] == "span_start" and e["name"] == "inner"
+        ][0]
         assert inner_start["parent_id"] == outer.id
 
     def test_span_yields_span_object(self, trace_file: Path):
-        with Tracer(trace_file) as tracer:
-            with tracer.span("test") as span:
-                assert hasattr(span, "id")
-                assert hasattr(span, "name")
-                assert span.name == "test"
-                span.set_output("result")
-                span.set_metadata("key", "value")
+        with Tracer(trace_file) as tracer, tracer.span("test") as span:
+            assert hasattr(span, "id")
+            assert hasattr(span, "name")
+            assert span.name == "test"
+            span.set_output("result")
+            span.set_metadata("key", "value")
         events = read_events(trace_file)
         end = [e for e in events if e["type"] == "span_end"][0]
         assert end["output"] == "result"
         assert end["metadata"]["key"] == "value"
 
     def test_span_update_metadata(self, trace_file: Path):
-        with Tracer(trace_file) as tracer:
-            with tracer.span("test") as span:
-                span.update_metadata({"a": 1, "b": 2})
-                span.set_metadata("c", 3)
+        with Tracer(trace_file) as tracer, tracer.span("test") as span:
+            span.update_metadata({"a": 1, "b": 2})
+            span.set_metadata("c", 3)
         events = read_events(trace_file)
         end = [e for e in events if e["type"] == "span_end"][0]
         assert end["metadata"] == {"a": 1, "b": 2, "c": 3}
@@ -290,9 +294,8 @@ class TestTags:
         assert end["tags"] == ["llm", "gpt-4o"]
 
     def test_span_no_tags_omitted(self, trace_file: Path):
-        with Tracer(trace_file) as tracer:
-            with tracer.span("step"):
-                pass
+        with Tracer(trace_file) as tracer, tracer.span("step"):
+            pass
         events = read_events(trace_file)
         start = [e for e in events if e["type"] == "span_start"][0]
         end = [e for e in events if e["type"] == "span_end"][0]
@@ -300,10 +303,9 @@ class TestTags:
         assert "tags" not in end
 
     def test_span_tags_on_error(self, trace_file: Path):
-        with Tracer(trace_file) as tracer:
-            with pytest.raises(ValueError):
-                with tracer.span("failing", tags=["important"]):
-                    raise ValueError("boom")
+        with Tracer(trace_file) as tracer, pytest.raises(ValueError):
+            with tracer.span("failing", tags=["important"]):
+                raise ValueError("boom")
         events = read_events(trace_file)
         end = [e for e in events if e["type"] == "span_end"][0]
         assert end["tags"] == ["important"]

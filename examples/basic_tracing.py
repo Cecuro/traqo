@@ -30,7 +30,6 @@ def main():
         tags=["example", "basic"],
         thread_id="demo-001",
     ) as tracer:
-
         # Span 1: a "tool" span grouping related work
         with tracer.span(
             "search",

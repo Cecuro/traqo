@@ -8,10 +8,10 @@ from typing import Any
 
 try:
     import google.genai as _genai_mod  # noqa: F401
-except ImportError:
+except ImportError as err:
     raise ImportError(
         "Google GenAI not installed. Install with: pip install traqo[gemini]"
-    )
+    ) from err
 
 from traqo.tracer import get_tracer
 
@@ -60,10 +60,14 @@ def _extract_output(response: Any) -> Any:
         for part in getattr(content, "parts", []):
             fc = getattr(part, "function_call", None)
             if fc:
-                function_calls.append({
-                    "name": getattr(fc, "name", ""),
-                    "args": dict(getattr(fc, "args", {})) if getattr(fc, "args", None) else {},
-                })
+                function_calls.append(
+                    {
+                        "name": getattr(fc, "name", ""),
+                        "args": dict(getattr(fc, "args", {}))
+                        if getattr(fc, "args", None)
+                        else {},
+                    }
+                )
     if function_calls:
         return {"content": text, "function_calls": function_calls}
     return text
@@ -73,10 +77,18 @@ def _extract_output(response: Any) -> Any:
 # Streaming helpers
 # ---------------------------------------------------------------------------
 
+
 class _StreamWrapper:
     """Wraps a Gemini sync stream — accumulates chunks and writes span on close."""
 
-    def __init__(self, stream: Any, span: Any, tracer: Any, capture_content: bool, span_ctx: Any = None) -> None:
+    def __init__(
+        self,
+        stream: Any,
+        span: Any,
+        tracer: Any,
+        capture_content: bool,
+        span_ctx: Any = None,
+    ) -> None:
         self._stream = stream
         self._span = span
         self._tracer = tracer
@@ -126,10 +138,14 @@ class _StreamWrapper:
                 for part in getattr(content, "parts", []):
                     fc = getattr(part, "function_call", None)
                     if fc:
-                        function_calls.append({
-                            "name": getattr(fc, "name", ""),
-                            "args": dict(getattr(fc, "args", {})) if getattr(fc, "args", None) else {},
-                        })
+                        function_calls.append(
+                            {
+                                "name": getattr(fc, "name", ""),
+                                "args": dict(getattr(fc, "args", {}))
+                                if getattr(fc, "args", None)
+                                else {},
+                            }
+                        )
 
         text = "".join(text_parts)
         if function_calls:
@@ -152,7 +168,14 @@ class _StreamWrapper:
 class _AsyncStreamWrapper:
     """Wraps a Gemini async stream — accumulates chunks and writes span on close."""
 
-    def __init__(self, stream: Any, span: Any, tracer: Any, capture_content: bool, span_ctx: Any = None) -> None:
+    def __init__(
+        self,
+        stream: Any,
+        span: Any,
+        tracer: Any,
+        capture_content: bool,
+        span_ctx: Any = None,
+    ) -> None:
         self._stream = stream
         self._span = span
         self._tracer = tracer
@@ -199,10 +222,14 @@ class _AsyncStreamWrapper:
                 for part in getattr(content, "parts", []):
                     fc = getattr(part, "function_call", None)
                     if fc:
-                        function_calls.append({
-                            "name": getattr(fc, "name", ""),
-                            "args": dict(getattr(fc, "args", {})) if getattr(fc, "args", None) else {},
-                        })
+                        function_calls.append(
+                            {
+                                "name": getattr(fc, "name", ""),
+                                "args": dict(getattr(fc, "args", {}))
+                                if getattr(fc, "args", None)
+                                else {},
+                            }
+                        )
 
         text = "".join(text_parts)
         if function_calls:
@@ -226,6 +253,7 @@ class _AsyncStreamWrapper:
 # Traced wrapper classes
 # ---------------------------------------------------------------------------
 
+
 class _TracedModels:
     """Wraps client.models for sync generate_content / generate_content_stream / embed_content."""
 
@@ -233,10 +261,19 @@ class _TracedModels:
         self._models = models
         self._operation = operation
 
-    def generate_content(self, *, model: str = "", contents: Any = None, config: Any = None, **kwargs: Any) -> Any:
+    def generate_content(
+        self,
+        *,
+        model: str = "",
+        contents: Any = None,
+        config: Any = None,
+        **kwargs: Any,
+    ) -> Any:
         tracer = get_tracer()
         if tracer is None:
-            return self._models.generate_content(model=model, contents=contents, config=config, **kwargs)
+            return self._models.generate_content(
+                model=model, contents=contents, config=config, **kwargs
+            )
 
         span_meta: dict[str, Any] = {"provider": "gemini"}
         if self._operation:
@@ -254,7 +291,9 @@ class _TracedModels:
             metadata=span_meta,
             kind="llm",
         ) as span:
-            response = self._models.generate_content(model=model, contents=contents, config=config, **kwargs)
+            response = self._models.generate_content(
+                model=model, contents=contents, config=config, **kwargs
+            )
             usage = _extract_usage(response)
             if usage:
                 span.set_metadata("token_usage", usage)
@@ -262,10 +301,19 @@ class _TracedModels:
                 span.set_output(_extract_output(response))
             return response
 
-    def generate_content_stream(self, *, model: str = "", contents: Any = None, config: Any = None, **kwargs: Any) -> Any:
+    def generate_content_stream(
+        self,
+        *,
+        model: str = "",
+        contents: Any = None,
+        config: Any = None,
+        **kwargs: Any,
+    ) -> Any:
         tracer = get_tracer()
         if tracer is None:
-            return self._models.generate_content_stream(model=model, contents=contents, config=config, **kwargs)
+            return self._models.generate_content_stream(
+                model=model, contents=contents, config=config, **kwargs
+            )
 
         span_meta: dict[str, Any] = {"provider": "gemini"}
         if self._operation:
@@ -285,13 +333,19 @@ class _TracedModels:
         )
         span = span_ctx.__enter__()
         try:
-            stream = self._models.generate_content_stream(model=model, contents=contents, config=config, **kwargs)
-            return _StreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
+            stream = self._models.generate_content_stream(
+                model=model, contents=contents, config=config, **kwargs
+            )
+            return _StreamWrapper(
+                stream, span, tracer, tracer.capture_content, span_ctx
+            )
         except BaseException:
             span_ctx.__exit__(*sys.exc_info())
             raise
 
-    def embed_content(self, *, model: str = "", contents: Any = None, **kwargs: Any) -> Any:
+    def embed_content(
+        self, *, model: str = "", contents: Any = None, **kwargs: Any
+    ) -> Any:
         tracer = get_tracer()
         if tracer is None:
             return self._models.embed_content(model=model, contents=contents, **kwargs)
@@ -309,7 +363,9 @@ class _TracedModels:
             metadata=span_meta,
             kind="embedding",
         ) as span:
-            response = self._models.embed_content(model=model, contents=contents, **kwargs)
+            response = self._models.embed_content(
+                model=model, contents=contents, **kwargs
+            )
             usage = _extract_usage(response)
             if usage:
                 span.set_metadata("token_usage", usage)
@@ -326,10 +382,19 @@ class _TracedAsyncModels:
         self._models = models
         self._operation = operation
 
-    async def generate_content(self, *, model: str = "", contents: Any = None, config: Any = None, **kwargs: Any) -> Any:
+    async def generate_content(
+        self,
+        *,
+        model: str = "",
+        contents: Any = None,
+        config: Any = None,
+        **kwargs: Any,
+    ) -> Any:
         tracer = get_tracer()
         if tracer is None:
-            return await self._models.generate_content(model=model, contents=contents, config=config, **kwargs)
+            return await self._models.generate_content(
+                model=model, contents=contents, config=config, **kwargs
+            )
 
         span_meta: dict[str, Any] = {"provider": "gemini"}
         if self._operation:
@@ -347,7 +412,9 @@ class _TracedAsyncModels:
             metadata=span_meta,
             kind="llm",
         ) as span:
-            response = await self._models.generate_content(model=model, contents=contents, config=config, **kwargs)
+            response = await self._models.generate_content(
+                model=model, contents=contents, config=config, **kwargs
+            )
             usage = _extract_usage(response)
             if usage:
                 span.set_metadata("token_usage", usage)
@@ -355,10 +422,19 @@ class _TracedAsyncModels:
                 span.set_output(_extract_output(response))
             return response
 
-    async def generate_content_stream(self, *, model: str = "", contents: Any = None, config: Any = None, **kwargs: Any) -> Any:
+    async def generate_content_stream(
+        self,
+        *,
+        model: str = "",
+        contents: Any = None,
+        config: Any = None,
+        **kwargs: Any,
+    ) -> Any:
         tracer = get_tracer()
         if tracer is None:
-            return await self._models.generate_content_stream(model=model, contents=contents, config=config, **kwargs)
+            return await self._models.generate_content_stream(
+                model=model, contents=contents, config=config, **kwargs
+            )
 
         span_meta: dict[str, Any] = {"provider": "gemini"}
         if self._operation:
@@ -378,8 +454,12 @@ class _TracedAsyncModels:
         )
         span = span_ctx.__enter__()
         try:
-            stream = await self._models.generate_content_stream(model=model, contents=contents, config=config, **kwargs)
-            return _AsyncStreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
+            stream = await self._models.generate_content_stream(
+                model=model, contents=contents, config=config, **kwargs
+            )
+            return _AsyncStreamWrapper(
+                stream, span, tracer, tracer.capture_content, span_ctx
+            )
         except BaseException:
             span_ctx.__exit__(*sys.exc_info())
             raise

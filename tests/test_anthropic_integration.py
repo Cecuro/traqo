@@ -9,18 +9,18 @@ import pytest
 
 pytest.importorskip("anthropic")
 
+from tests.conftest import read_events
 from traqo import Tracer
 from traqo.integrations.anthropic import (
     _TracedAsyncMessages,
     _TracedMessages,
     traced_anthropic,
 )
-from tests.conftest import read_events
-
 
 # ---------------------------------------------------------------------------
 # Mock helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_message_response(
     text: str = "Hello",
@@ -103,9 +103,12 @@ def _make_stream_events(
 # Tests
 # ---------------------------------------------------------------------------
 
+
 class TestMessagesCreateTextResponse:
     def test_text_response(self, trace_file: Path):
-        response = _make_message_response("Hello world", "claude-3-sonnet-20240229", 10, 5)
+        response = _make_message_response(
+            "Hello world", "claude-3-sonnet-20240229", 10, 5
+        )
         mock_messages = MagicMock()
         mock_messages.create.return_value = response
 
@@ -144,8 +147,12 @@ class TestMessagesCreateTextResponse:
 class TestMessagesCreateCacheTokens:
     def test_cache_tokens_in_metadata(self, trace_file: Path):
         response = _make_message_response(
-            "Cached response", "claude-3-sonnet-20240229", 100, 50,
-            cache_read=30, cache_creation=10,
+            "Cached response",
+            "claude-3-sonnet-20240229",
+            100,
+            50,
+            cache_read=30,
+            cache_creation=10,
         )
         mock_messages = MagicMock()
         mock_messages.create.return_value = response
@@ -170,8 +177,12 @@ class TestMessagesCreateCacheTokens:
 
 class TestMessagesCreateToolUse:
     def test_tool_use_in_response(self, trace_file: Path):
-        tool_use = [{"id": "toolu_123", "name": "get_weather", "input": {"city": "NYC"}}]
-        response = _make_message_response("", "claude-3-sonnet-20240229", 15, 20, tool_use=tool_use)
+        tool_use = [
+            {"id": "toolu_123", "name": "get_weather", "input": {"city": "NYC"}}
+        ]
+        response = _make_message_response(
+            "", "claude-3-sonnet-20240229", 15, 20, tool_use=tool_use
+        )
         mock_messages = MagicMock()
         mock_messages.create.return_value = response
 
@@ -240,14 +251,17 @@ class TestMessagesCreateSystemMessage:
         span_start = [e for e in events if e["type"] == "span_start"][0]
 
         assert span_start["input"][0] == {
-            "role": "system", "content": "You are a helpful assistant",
+            "role": "system",
+            "content": "You are a helpful assistant",
         }
         assert span_start["input"][1] == {"role": "user", "content": "Hi"}
 
 
 class TestMessagesStreaming:
     def test_streaming_via_create(self, trace_file: Path):
-        stream_events = _make_stream_events(["Hello", " world"], input_tokens=10, output_tokens=5)
+        stream_events = _make_stream_events(
+            ["Hello", " world"], input_tokens=10, output_tokens=5
+        )
         mock_messages = MagicMock()
         mock_messages.create.return_value = iter(stream_events)
 
@@ -282,8 +296,10 @@ class TestMessagesStreaming:
 class TestMessagesStreamMethod:
     def test_stream_method(self, trace_file: Path):
         stream_events = _make_stream_events(
-            ["Hi", " there"], model="claude-3-haiku-20240307",
-            input_tokens=8, output_tokens=3,
+            ["Hi", " there"],
+            model="claude-3-haiku-20240307",
+            input_tokens=8,
+            output_tokens=3,
         )
         mock_messages = MagicMock()
         mock_messages.stream.return_value = iter(stream_events)
@@ -454,7 +470,9 @@ class TestTracedAnthropicEndToEnd:
 
 class TestAsyncMessages:
     async def test_async_create(self, trace_file: Path):
-        response = _make_message_response("Async hello", "claude-3-sonnet-20240229", 10, 5)
+        response = _make_message_response(
+            "Async hello", "claude-3-sonnet-20240229", 10, 5
+        )
         mock_messages = MagicMock()
         mock_messages.create = AsyncMock(return_value=response)
 

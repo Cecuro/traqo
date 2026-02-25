@@ -6,8 +6,8 @@ import os
 
 from traqo._version import __version__
 from traqo.backend import Backend, flush_backends, shutdown_backends
-from traqo.logging import setup_logging
 from traqo.decorator import trace
+from traqo.logging import setup_logging
 from traqo.reader import LLMSpan, aggregate_tokens, iter_llm_spans
 from traqo.tracer import (
     AGENT,
@@ -41,29 +41,29 @@ def enable() -> None:
 
 
 __all__ = [
+    "AGENT",
+    "CHAIN",
+    "EMBEDDING",
+    "GUARDRAIL",
+    # Span kind constants
+    "LLM",
+    "RETRIEVER",
+    "TOOL",
     "Backend",
     "LLMSpan",
     "Span",
     "Tracer",
-    "trace",
+    "__version__",
     "aggregate_tokens",
-    "get_tracer",
-    "get_current_span",
-    "iter_llm_spans",
-    "subtrace",
-    "update_current_span",
     "disable",
     "enable",
-    "setup_logging",
     "flush_backends",
+    "get_current_span",
+    "get_tracer",
+    "iter_llm_spans",
+    "setup_logging",
     "shutdown_backends",
-    "__version__",
-    # Span kind constants
-    "LLM",
-    "TOOL",
-    "RETRIEVER",
-    "CHAIN",
-    "AGENT",
-    "EMBEDDING",
-    "GUARDRAIL",
+    "subtrace",
+    "trace",
+    "update_current_span",
 ]

@@ -8,17 +8,19 @@ from typing import Any
 
 try:
     import anthropic as _anthropic_mod
-except ImportError:
+except ImportError as err:
     raise ImportError(
         "Anthropic not installed. Install with: pip install traqo[anthropic]"
-    )
+    ) from err
 
 from traqo.tracer import get_tracer
 
 _ANTHROPIC_MODEL_PARAMS = ("temperature", "max_tokens", "top_p", "top_k")
 
 
-def _extract_model_params(kwargs: dict[str, Any], param_names: tuple[str, ...]) -> dict[str, Any] | None:
+def _extract_model_params(
+    kwargs: dict[str, Any], param_names: tuple[str, ...]
+) -> dict[str, Any] | None:
     """Extract generation parameters present in kwargs."""
     params = {k: kwargs[k] for k in param_names if k in kwargs}
     return params or None
@@ -30,11 +32,13 @@ def _extract_tool_use(content: list[Any]) -> list[dict[str, Any]] | None:
     for block in content:
         block_type = getattr(block, "type", None)
         if block_type == "tool_use":
-            tool_uses.append({
-                "id": getattr(block, "id", ""),
-                "name": getattr(block, "name", ""),
-                "input": getattr(block, "input", {}),
-            })
+            tool_uses.append(
+                {
+                    "id": getattr(block, "id", ""),
+                    "name": getattr(block, "name", ""),
+                    "input": getattr(block, "input", {}),
+                }
+            )
     return tool_uses or None
 
 
@@ -45,10 +49,7 @@ def _extract_response(response: Any) -> tuple[Any, dict[str, int], str]:
         text_blocks = [b.text for b in response.content if hasattr(b, "text")]
         text = "\n".join(text_blocks)
         tool_uses = _extract_tool_use(response.content)
-        if tool_uses:
-            output = {"content": text, "tool_use": tool_uses}
-        else:
-            output = text
+        output = {"content": text, "tool_use": tool_uses} if tool_uses else text
 
     usage: dict[str, int] = {}
     if response.usage:
@@ -78,13 +79,16 @@ def _extract_messages(kwargs: dict[str, Any]) -> list[dict[str, Any]]:
         if isinstance(m, dict):
             result.append({"role": m.get("role", ""), "content": m.get("content", "")})
         else:
-            result.append({"role": getattr(m, "role", ""), "content": getattr(m, "content", "")})
+            result.append(
+                {"role": getattr(m, "role", ""), "content": getattr(m, "content", "")}
+            )
     return result
 
 
 # ---------------------------------------------------------------------------
 # Streaming helpers
 # ---------------------------------------------------------------------------
+
 
 def _aggregate_stream_events(events: list[Any]) -> tuple[Any, dict[str, int], str]:
     """Aggregate Anthropic stream events into a single result."""
@@ -129,6 +133,7 @@ def _aggregate_stream_events(events: list[Any]) -> tuple[Any, dict[str, int], st
                 raw = current_tool["input"]
                 try:
                     import json
+
                     current_tool["input"] = json.loads(raw)
                 except (json.JSONDecodeError, TypeError):
                     pass  # Keep as string
@@ -153,7 +158,14 @@ def _aggregate_stream_events(events: list[Any]) -> tuple[Any, dict[str, int], st
 class _StreamWrapper:
     """Wraps an Anthropic sync stream — accumulates events and writes span on close."""
 
-    def __init__(self, stream: Any, span: Any, tracer: Any, capture_content: bool, span_ctx: Any = None) -> None:
+    def __init__(
+        self,
+        stream: Any,
+        span: Any,
+        tracer: Any,
+        capture_content: bool,
+        span_ctx: Any = None,
+    ) -> None:
         self._stream = stream
         self._span = span
         self._tracer = tracer
@@ -215,7 +227,14 @@ class _StreamWrapper:
 class _AsyncStreamWrapper:
     """Wraps an Anthropic async stream — accumulates events and writes span on close."""
 
-    def __init__(self, stream: Any, span: Any, tracer: Any, capture_content: bool, span_ctx: Any = None) -> None:
+    def __init__(
+        self,
+        stream: Any,
+        span: Any,
+        tracer: Any,
+        capture_content: bool,
+        span_ctx: Any = None,
+    ) -> None:
         self._stream = stream
         self._span = span
         self._tracer = tracer
@@ -278,6 +297,7 @@ class _AsyncStreamWrapper:
 # Traced wrapper classes
 # ---------------------------------------------------------------------------
 
+
 class _TracedMessages:
     def __init__(self, messages: Any, operation: str) -> None:
         self._messages = messages
@@ -308,7 +328,9 @@ class _TracedMessages:
             span = span_ctx.__enter__()
             try:
                 stream = self._messages.create(**kwargs)
-                return _StreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
+                return _StreamWrapper(
+                    stream, span, tracer, tracer.capture_content, span_ctx
+                )
             except BaseException:
                 span_ctx.__exit__(*sys.exc_info())
                 raise
@@ -351,7 +373,9 @@ class _TracedMessages:
         span = span_ctx.__enter__()
         try:
             stream = self._messages.stream(**kwargs)
-            return _StreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
+            return _StreamWrapper(
+                stream, span, tracer, tracer.capture_content, span_ctx
+            )
         except BaseException:
             span_ctx.__exit__(*sys.exc_info())
             raise
@@ -390,7 +414,9 @@ class _TracedAsyncMessages:
             span = span_ctx.__enter__()
             try:
                 stream = await self._messages.create(**kwargs)
-                return _AsyncStreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
+                return _AsyncStreamWrapper(
+                    stream, span, tracer, tracer.capture_content, span_ctx
+                )
             except BaseException:
                 span_ctx.__exit__(*sys.exc_info())
                 raise
@@ -433,7 +459,9 @@ class _TracedAsyncMessages:
         span = span_ctx.__enter__()
         try:
             stream = await self._messages.stream(**kwargs)
-            return _AsyncStreamWrapper(stream, span, tracer, tracer.capture_content, span_ctx)
+            return _AsyncStreamWrapper(
+                stream, span, tracer, tracer.capture_content, span_ctx
+            )
         except BaseException:
             span_ctx.__exit__(*sys.exc_info())
             raise

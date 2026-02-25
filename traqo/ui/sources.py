@@ -53,7 +53,9 @@ class TraceSource(Protocol):
 
     def list_traces(self) -> list[TraceSummary]: ...
 
-    def read_first_last(self, key: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]: ...
+    def read_first_last(
+        self, key: str
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]: ...
 
     def read_all(self, key: str) -> list[dict[str, Any]]: ...
 
@@ -77,7 +79,9 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return events
 
 
-def _read_first_last_lines(path: Path) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+def _read_first_last_lines(
+    path: Path,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """Read only the first and last lines of a JSONL file for fast summary."""
     first = None
     last = None
@@ -96,7 +100,9 @@ def _read_first_last_lines(path: Path) -> tuple[dict[str, Any] | None, dict[str,
     return first, last
 
 
-def _enrich_summary(summary: TraceSummary, first: dict[str, Any] | None, last: dict[str, Any] | None) -> None:
+def _enrich_summary(
+    summary: TraceSummary, first: dict[str, Any] | None, last: dict[str, Any] | None
+) -> None:
     """Populate summary fields from trace_start / trace_end events."""
     if first and first.get("type") == "trace_start":
         summary.ts = first.get("ts")
@@ -130,14 +136,18 @@ class LocalSource:
             try:
                 key = str(f.relative_to(self._path))
                 first, last = _read_first_last_lines(f)
-                summary = TraceSummary(key=key, file=key, last_modified=f.stat().st_mtime)
+                summary = TraceSummary(
+                    key=key, file=key, last_modified=f.stat().st_mtime
+                )
                 _enrich_summary(summary, first, last)
                 summaries.append(summary)
             except Exception:
                 continue
         return summaries
 
-    def read_first_last(self, key: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    def read_first_last(
+        self, key: str
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
         target = (self._path / key).resolve()
         if not self._is_safe_path(target):
             return None, None
@@ -169,7 +179,9 @@ class LocalSource:
 class S3Source:
     """Read traces from an S3 bucket with local temp-dir cache."""
 
-    def __init__(self, bucket: str, prefix: str = "", *, boto3_client: Any = None) -> None:
+    def __init__(
+        self, bucket: str, prefix: str = "", *, boto3_client: Any = None
+    ) -> None:
         self._bucket = bucket
         self._prefix = prefix
         if boto3_client is not None:
@@ -177,10 +189,10 @@ class S3Source:
         else:
             try:
                 import boto3
-            except ImportError:
+            except ImportError as err:
                 raise ImportError(
                     "boto3 is not installed. Install with: pip install traqo[s3]"
-                )
+                ) from err
             self._client = boto3.client("s3")
         self._cache_dir = Path(tempfile.mkdtemp(prefix="traqo-s3-"))
         # key -> last_modified epoch from cloud listing
@@ -195,7 +207,7 @@ class S3Source:
                 if not obj_key.endswith(".jsonl"):
                     continue
                 # Strip prefix for display
-                rel = obj_key[len(self._prefix):] if self._prefix else obj_key
+                rel = obj_key[len(self._prefix) :] if self._prefix else obj_key
                 mtime = obj["LastModified"].timestamp()
                 self._cloud_mtimes[rel] = mtime
 
@@ -214,10 +226,17 @@ class S3Source:
 
         # Sort by last_modified descending
         summaries.sort(key=lambda s: s.last_modified or 0, reverse=True)
-        logger.info("listed %d traces from s3://%s/%s", len(summaries), self._bucket, self._prefix)
+        logger.info(
+            "listed %d traces from s3://%s/%s",
+            len(summaries),
+            self._bucket,
+            self._prefix,
+        )
         return summaries
 
-    def read_first_last(self, key: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    def read_first_last(
+        self, key: str
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
         cached = self._cache_dir / key
         if cached.is_file():
             return _read_first_last_lines(cached)
@@ -252,7 +271,9 @@ class S3Source:
 class GCSSource:
     """Read traces from a GCS bucket with local temp-dir cache."""
 
-    def __init__(self, bucket: str, prefix: str = "", *, gcs_client: Any = None) -> None:
+    def __init__(
+        self, bucket: str, prefix: str = "", *, gcs_client: Any = None
+    ) -> None:
         self._bucket_name = bucket
         self._prefix = prefix
         if gcs_client is not None:
@@ -260,11 +281,11 @@ class GCSSource:
         else:
             try:
                 from google.cloud import storage as _gcs_storage
-            except ImportError:
+            except ImportError as err:
                 raise ImportError(
                     "google-cloud-storage is not installed. "
                     "Install with: pip install traqo[gcs]"
-                )
+                ) from err
             client = _gcs_storage.Client()
         self._bucket = client.bucket(bucket)
         self._cache_dir = Path(tempfile.mkdtemp(prefix="traqo-gcs-"))
@@ -277,7 +298,7 @@ class GCSSource:
             name: str = blob.name
             if not name.endswith(".jsonl"):
                 continue
-            rel = name[len(self._prefix):] if self._prefix else name
+            rel = name[len(self._prefix) :] if self._prefix else name
             mtime = blob.updated.timestamp() if blob.updated else 0.0
             self._cloud_mtimes[rel] = mtime
 
@@ -294,10 +315,17 @@ class GCSSource:
             summaries.append(summary)
 
         summaries.sort(key=lambda s: s.last_modified or 0, reverse=True)
-        logger.info("listed %d traces from gs://%s/%s", len(summaries), self._bucket_name, self._prefix)
+        logger.info(
+            "listed %d traces from gs://%s/%s",
+            len(summaries),
+            self._bucket_name,
+            self._prefix,
+        )
         return summaries
 
-    def read_first_last(self, key: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    def read_first_last(
+        self, key: str
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
         cached = self._cache_dir / key
         if cached.is_file():
             return _read_first_last_lines(cached)

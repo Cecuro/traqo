@@ -80,7 +80,9 @@ def _serialize_value(value: Any, *, _seen: set[int] | None = None) -> Any:
             if isinstance(value, (list, tuple)):
                 return [_serialize_value(v, _seen=_seen) for v in value]
             if isinstance(value, (set, frozenset)):
-                return [_serialize_value(v, _seen=_seen) for v in sorted(value, key=str)]
+                return [
+                    _serialize_value(v, _seen=_seen) for v in sorted(value, key=str)
+                ]
 
             # 5. Pydantic
             if hasattr(value, "model_dump"):
@@ -148,5 +150,8 @@ def to_json(event: dict[str, Any]) -> str:
     non-JSON-native types before json.dumps sees them.
     """
     return json.dumps(
-        _serialize_value(event), default=json_default, ensure_ascii=False, allow_nan=False
+        _serialize_value(event),
+        default=json_default,
+        ensure_ascii=False,
+        allow_nan=False,
     )

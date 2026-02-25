@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 import pytest
 
-from traqo import Tracer, trace
 from tests.conftest import read_events
+from traqo import Tracer, trace
 
 
 class TestSyncDecorator:
@@ -36,9 +35,8 @@ class TestSyncDecorator:
         def fail():
             raise RuntimeError("oops")
 
-        with Tracer(trace_file):
-            with pytest.raises(RuntimeError, match="oops"):
-                fail()
+        with Tracer(trace_file), pytest.raises(RuntimeError, match="oops"):
+            fail()
 
         events = read_events(trace_file)
         end = [e for e in events if e["type"] == "span_end"][0]
@@ -170,8 +168,12 @@ class TestNesting:
             outer()
 
         events = read_events(trace_file)
-        outer_start = [e for e in events if e["type"] == "span_start" and e["name"] == "outer"][0]
-        inner_start = [e for e in events if e["type"] == "span_start" and e["name"] == "inner"][0]
+        outer_start = [
+            e for e in events if e["type"] == "span_start" and e["name"] == "outer"
+        ][0]
+        inner_start = [
+            e for e in events if e["type"] == "span_start" and e["name"] == "inner"
+        ][0]
         assert inner_start["parent_id"] == outer_start["id"]
 
     async def test_async_nested_traces(self, trace_file: Path):
@@ -187,8 +189,12 @@ class TestNesting:
             await pipeline()
 
         events = read_events(trace_file)
-        pipeline_start = [e for e in events if e["type"] == "span_start" and e["name"] == "pipeline"][0]
-        step_start = [e for e in events if e["type"] == "span_start" and e["name"] == "step"][0]
+        pipeline_start = [
+            e for e in events if e["type"] == "span_start" and e["name"] == "pipeline"
+        ][0]
+        step_start = [
+            e for e in events if e["type"] == "span_start" and e["name"] == "step"
+        ][0]
         assert step_start["parent_id"] == pipeline_start["id"]
 
 
@@ -286,8 +292,7 @@ class TestGeneratorDecorator:
     def test_sync_generator(self, trace_file: Path):
         @trace()
         def count(n: int):
-            for i in range(n):
-                yield i
+            yield from range(n)
 
         with Tracer(trace_file):
             items = list(count(3))
@@ -306,8 +311,7 @@ class TestGeneratorDecorator:
     def test_sync_generator_no_tracer_passthrough(self):
         @trace()
         def count(n: int):
-            for i in range(n):
-                yield i
+            yield from range(n)
 
         items = list(count(3))
         assert items == [0, 1, 2]
@@ -315,8 +319,7 @@ class TestGeneratorDecorator:
     def test_sync_generator_capture_output_false(self, trace_file: Path):
         @trace(capture_output=False)
         def count(n: int):
-            for i in range(n):
-                yield i
+            yield from range(n)
 
         with Tracer(trace_file):
             items = list(count(3))
@@ -330,7 +333,7 @@ class TestGeneratorDecorator:
         @trace()
         def empty():
             return
-            yield  # noqa: unreachable
+            yield
 
         with Tracer(trace_file):
             items = list(empty())
@@ -372,8 +375,7 @@ class TestGeneratorDecorator:
     def test_generator_with_ignore_arguments(self, trace_file: Path):
         @trace(ignore_arguments=["secret"])
         def gen(n: int, secret: str):
-            for i in range(n):
-                yield i
+            yield from range(n)
 
         with Tracer(trace_file):
             items = list(gen(2, "hidden"))

@@ -9,18 +9,18 @@ import pytest
 
 pytest.importorskip("openai")
 
+from tests.conftest import read_events
 from traqo import Tracer
 from traqo.integrations.openai import (
     _TracedAsyncCompletions,
     _TracedCompletions,
     traced_openai,
 )
-from tests.conftest import read_events
-
 
 # ---------------------------------------------------------------------------
 # Mock helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_chat_response(
     content: str = "Hello",
@@ -115,6 +115,7 @@ def _make_tool_call_delta(
 # Tests
 # ---------------------------------------------------------------------------
 
+
 class TestCompletionsCreateTextResponse:
     def test_text_response(self, trace_file: Path):
         response = _make_chat_response("Hello world", "gpt-4", 10, 5)
@@ -145,7 +146,8 @@ class TestCompletionsCreateTextResponse:
         assert span_ends[0]["status"] == "ok"
         assert span_ends[0]["metadata"]["model"] == "gpt-4"
         assert span_ends[0]["metadata"]["token_usage"] == {
-            "input_tokens": 10, "output_tokens": 5,
+            "input_tokens": 10,
+            "output_tokens": 5,
         }
         assert span_ends[0]["output"] == "Hello world"
 
@@ -155,11 +157,13 @@ class TestCompletionsCreateTextResponse:
 
 class TestCompletionsCreateToolCalls:
     def test_tool_calls_in_response(self, trace_file: Path):
-        tool_calls = [{
-            "id": "call_abc",
-            "type": "function",
-            "function": {"name": "get_weather", "arguments": '{"city": "NYC"}'},
-        }]
+        tool_calls = [
+            {
+                "id": "call_abc",
+                "type": "function",
+                "function": {"name": "get_weather", "arguments": '{"city": "NYC"}'},
+            }
+        ]
         response = _make_chat_response("", "gpt-4", 15, 20, tool_calls=tool_calls)
         mock_completions = MagicMock()
         mock_completions.create.return_value = response
@@ -206,7 +210,8 @@ class TestCompletionsCaptureContentFalse:
         # Token usage and model are metadata, not content — still captured
         assert span_end["metadata"]["model"] == "gpt-4"
         assert span_end["metadata"]["token_usage"] == {
-            "input_tokens": 10, "output_tokens": 5,
+            "input_tokens": 10,
+            "output_tokens": 5,
         }
 
 
@@ -246,7 +251,8 @@ class TestCompletionsStreaming:
         assert span_end["output"] == "Hello world"
         assert span_end["metadata"]["model"] == "gpt-4"
         assert span_end["metadata"]["token_usage"] == {
-            "input_tokens": 10, "output_tokens": 5,
+            "input_tokens": 10,
+            "output_tokens": 5,
         }
         assert "time_to_first_token_s" in span_end["metadata"]
         assert isinstance(span_end["metadata"]["time_to_first_token_s"], float)
@@ -278,7 +284,11 @@ class TestStreamingToolCallDeltas:
     def test_tool_call_assembly(self, trace_file: Path):
         # Chunk 1: start of tool call with id and name
         tc_delta1 = _make_tool_call_delta(
-            0, tc_id="call_xyz", name="search", arguments="", tc_type="function",
+            0,
+            tc_id="call_xyz",
+            name="search",
+            arguments="",
+            tc_type="function",
         )
         chunk1 = _make_stream_chunk(model="gpt-4", tool_calls=[tc_delta1])
 
@@ -321,15 +331,24 @@ class TestStreamingToolCallDeltas:
 
     def test_multiple_tool_calls_by_index(self, trace_file: Path):
         tc0 = _make_tool_call_delta(
-            0, tc_id="call_1", name="fn_a", arguments='{"a":1}', tc_type="function",
+            0,
+            tc_id="call_1",
+            name="fn_a",
+            arguments='{"a":1}',
+            tc_type="function",
         )
         tc1 = _make_tool_call_delta(
-            1, tc_id="call_2", name="fn_b", arguments='{"b":2}', tc_type="function",
+            1,
+            tc_id="call_2",
+            name="fn_b",
+            arguments='{"b":2}',
+            tc_type="function",
         )
         chunk1 = _make_stream_chunk(model="gpt-4", tool_calls=[tc0])
         chunk2 = _make_stream_chunk(model="gpt-4", tool_calls=[tc1])
         chunk3 = _make_stream_chunk(
-            model="gpt-4", usage={"prompt_tokens": 5, "completion_tokens": 10},
+            model="gpt-4",
+            usage={"prompt_tokens": 5, "completion_tokens": 10},
         )
 
         mock_completions = MagicMock()
@@ -509,5 +528,6 @@ class TestAsyncCompletions:
         assert span_end["output"] == "Async hello"
         assert span_end["metadata"]["model"] == "gpt-4"
         assert span_end["metadata"]["token_usage"] == {
-            "input_tokens": 10, "output_tokens": 5,
+            "input_tokens": 10,
+            "output_tokens": 5,
         }

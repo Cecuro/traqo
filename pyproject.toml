@@ -33,7 +33,7 @@ gemini = ["google-genai>=1.0"]
 s3 = ["boto3>=1.28"]
 gcs = ["google-cloud-storage>=2.10"]
 all = ["traqo[langchain,openai,anthropic,gemini,s3,gcs]"]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.24"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.12.0", "pyright>=1.1.400"]
 
 [project.scripts]
 traqo = "traqo.__main__:main"
@@ -44,3 +44,52 @@ Repository = "https://github.com/Cecuro/traqo"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+
+# ── Ruff ──────────────────────────────────────────────────────────────
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "T10",  # flake8-debugger
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff-specific rules
+]
+ignore = [
+    "E501",   # line too long — handled by formatter
+    "SIM102", # nested if — readability preference
+]
+fixable = ["ALL"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "SIM117",  # nested with statements — readable in test code
+    "RUF015",  # [list][0] vs next() — common test pattern
+    "RUF012",  # mutable class attr defaults — fine in test fakes
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+# ── Pyright ───────────────────────────────────────────────────────────
+[tool.pyright]
+pythonVersion = "3.10"
+typeCheckingMode = "basic"
+include = ["traqo"]
+# Integration modules import optional deps that may not be installed
+reportMissingImports = "warning"
+# Optional-dep wrappers use dynamic attribute access heavily
+reportOptionalMemberAccess = false
+reportAttributeAccessIssue = false
+# dict vs Mapping, BaseException | None — common at integration boundaries
+reportReturnType = "warning"
+reportArgumentType = "warning"

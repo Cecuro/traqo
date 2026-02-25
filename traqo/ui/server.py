@@ -101,7 +101,10 @@ def _make_handler(source: TraceSource, static_dir: Path, *, dev: bool = False):
             if dev and ext == ".html":
                 body = body.replace(b"</body>", _RELOAD_SCRIPT.encode() + b"</body>")
             self.send_response(200)
-            if mime.startswith("text/") or mime in ("application/javascript", "application/json"):
+            if mime.startswith("text/") or mime in (
+                "application/javascript",
+                "application/json",
+            ):
                 self.send_header("Content-Type", f"{mime}; charset=utf-8")
             else:
                 self.send_header("Content-Type", mime)
@@ -152,7 +155,9 @@ def serve(
 
     source = parse_source(uri)
 
-    static_path = Path(static_dir).resolve() if static_dir else Path(__file__).parent / "static"
+    static_path = (
+        Path(static_dir).resolve() if static_dir else Path(__file__).parent / "static"
+    )
     if not static_path.is_dir():
         print(f"Error: static dir {static_path} not found", file=sys.stderr)
         sys.exit(1)
@@ -183,10 +188,23 @@ def main() -> None:
         default=".",
         help="Trace source: local directory, s3://bucket/prefix, or gs://bucket/prefix",
     )
-    parser.add_argument("--port", "-p", type=int, default=7600, help="Port to serve on (default: 7600)")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Show cloud listing and download activity")
-    parser.add_argument("--dev", action="store_true", help="Enable hot reload on static file changes")
-    parser.add_argument("--static-dir", default=None, help="Override static file directory (for development)")
+    parser.add_argument(
+        "--port", "-p", type=int, default=7600, help="Port to serve on (default: 7600)"
+    )
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Show cloud listing and download activity",
+    )
+    parser.add_argument(
+        "--dev", action="store_true", help="Enable hot reload on static file changes"
+    )
+    parser.add_argument(
+        "--static-dir",
+        default=None,
+        help="Override static file directory (for development)",
+    )
     args = parser.parse_args()
     setup_logging(verbose=args.verbose)
     serve(args.source, args.port, dev=args.dev, static_dir=args.static_dir)

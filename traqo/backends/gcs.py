@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 try:
     from google.cloud import storage as gcs_storage
-except ImportError:
+except ImportError as err:
     raise ImportError(
-        "google-cloud-storage is not installed. "
-        "Install with: pip install traqo[gcs]"
-    )
+        "google-cloud-storage is not installed. Install with: pip install traqo[gcs]"
+    ) from err
 
 from traqo.backend import submit_background
 
@@ -52,7 +52,7 @@ class GCSBackend:
         self._bucket = client.bucket(bucket)
         self._upload_kwargs = upload_kwargs or {}
 
-    def on_event(self, event: dict[str, Any]) -> None:  # noqa: ARG002
+    def on_event(self, event: dict[str, Any]) -> None:
         pass
 
     def on_trace_complete(self, trace_path: Path) -> None:

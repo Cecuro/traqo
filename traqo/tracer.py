@@ -56,7 +56,7 @@ def _get_parent_id() -> str | None:
 
 def _push_span(span_obj: Span) -> None:
     stack = _span_stack.get(())
-    _span_stack.set(stack + (span_obj,))
+    _span_stack.set((*stack, span_obj))
 
 
 def _pop_span() -> None:
@@ -79,7 +79,7 @@ class Span:
     Set output and metadata during execution — they are written to span_end.
     """
 
-    __slots__ = ("id", "name", "parent_id", "output", "metadata", "tags")
+    __slots__ = ("id", "metadata", "name", "output", "parent_id", "tags")
 
     def __init__(self, span_id: str, name: str, parent_id: str | None) -> None:
         self.id = span_id
@@ -185,7 +185,7 @@ class Tracer:
         if self._disabled:
             return
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._file = open(self._path, "a", encoding="utf-8")
+        self._file = open(self._path, "a", encoding="utf-8")  # noqa: SIM115
 
     def _close(self) -> None:
         if self._file:
@@ -395,7 +395,9 @@ class Tracer:
                     end_event["metadata"] = span_obj.metadata.copy()
                 self._write(end_event)
             except Exception:
-                logger.warning("traqo: failed to write span_end on error", exc_info=True)
+                logger.warning(
+                    "traqo: failed to write span_end on error", exc_info=True
+                )
             raise
         finally:
             _pop_span()
@@ -451,8 +453,8 @@ class Tracer:
             capture_content=self._capture_content,
             backends=self._backends,
         )
-        child_tracer._parent = self  # noqa: SLF001
-        child_tracer._child_name = name  # noqa: SLF001
+        child_tracer._parent = self
+        child_tracer._child_name = name
         return child_tracer
 
     def _write_child_started(self, name: str, path: Path) -> None:
@@ -463,7 +465,11 @@ class Tracer:
                 "parent_id": _get_parent_id(),
                 "name": "child_started",
                 "ts": _now(),
-                "data": {"child_name": name, "child_path": str(path), "child_file": path.name},
+                "data": {
+                    "child_name": name,
+                    "child_path": str(path),
+                    "child_file": path.name,
+                },
             }
         )
         with self._lock:
@@ -510,16 +516,19 @@ class Tracer:
         )
 
 
-
 # ---------------------------------------------------------------------------
 # Convenience helper
 # ---------------------------------------------------------------------------
 
+
 class _Unset:
     """Sentinel to distinguish 'not provided' from None."""
+
     __slots__ = ()
+
     def __repr__(self) -> str:
         return "<UNSET>"
+
 
 _UNSET = _Unset()
 

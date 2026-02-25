@@ -4,10 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
-from traqo import Tracer, get_tracer
 from tests.conftest import read_events
+from traqo import Tracer, get_tracer
 
 
 class TestChildTracer:
@@ -74,7 +72,11 @@ class TestChildTracer:
                     pass
 
         parent_events = read_events(parent_path)
-        ended = [e for e in parent_events if e["type"] == "event" and e.get("name") == "child_ended"][0]
+        ended = [
+            e
+            for e in parent_events
+            if e["type"] == "event" and e.get("name") == "child_ended"
+        ][0]
         assert ended["data"]["spans"] == 2
         assert ended["data"]["total_input_tokens"] == 30
         assert ended["data"]["total_output_tokens"] == 15
@@ -109,9 +111,8 @@ class TestChildTracer:
 
         with Tracer(parent_path) as parent:
             child = parent.child("agent_a", child_path)
-            with child:
-                with child.span("work", kind="llm"):
-                    pass
+            with child, child.span("work", kind="llm"):
+                pass
 
         parent_events = read_events(parent_path)
         trace_end = parent_events[-1]

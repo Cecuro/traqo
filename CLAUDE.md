@@ -8,9 +8,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 uv run pytest tests/ -v              # Run all tests
 uv run pytest tests/test_tracer.py -v # Run a single test file
 uv run pytest tests/ -k "test_nan"   # Run tests matching a pattern
+uv run ruff check --fix . && uv run ruff format .  # Lint + format
+uv run pyright traqo/                # Type check
 ```
 
-No linter or formatter is configured. Zero runtime dependencies — only stdlib. Storage backends (S3, GCS) are optional extras.
+**Before finishing any task**, run ruff and pyright to catch issues:
+```bash
+uv run ruff check --fix . && uv run ruff format . && uv run pyright traqo/
+```
+
+Zero runtime dependencies — only stdlib. Storage backends (S3, GCS) are optional extras.
+
+## Development guidelines
+
+- **Package management**: Only use `uv`, never pip.
+- **Git hygiene**: Never use `git add -A` or `git add .` — add files explicitly by name. This prevents accidental commits of `.jsonl` trace files or `.env`.
+- **File creation**: Don't create `.md` or `.txt` files unless explicitly requested.
+- **Simple solutions**: Prefer straightforward code over abstractions. Remove unused code immediately.
 
 ## Architecture
 

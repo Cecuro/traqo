@@ -5,20 +5,18 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 import traqo
+from tests.conftest import read_events
 from traqo import Backend, Tracer
 from traqo.backend import (
     flush_backends,
     shutdown_backends,
-    _get_executor,
 )
 from traqo.backends.local import LocalBackend
-from tests.conftest import read_events
-
 
 # ---------------------------------------------------------------------------
 # Test fakes
@@ -139,9 +137,8 @@ class TestTracerBackendIntegration:
 
     def test_no_backends_is_default(self, trace_file):
         """Omitting backends= produces normal behavior."""
-        with Tracer(trace_file) as tracer:
-            with tracer.span("step"):
-                pass
+        with Tracer(trace_file) as tracer, tracer.span("step"):
+            pass
         events = read_events(trace_file)
         assert events[0]["type"] == "trace_start"
         assert events[-1]["type"] == "trace_end"
