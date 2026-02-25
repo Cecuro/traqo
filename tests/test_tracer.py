@@ -12,7 +12,7 @@ from traqo import Tracer, get_current_span, get_tracer, trace
 
 class TestTraceStartEnd:
     def test_trace_start_written_on_enter(self, trace_file: Path):
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             events = read_events(trace_file)
             assert len(events) == 1
             assert events[0]["type"] == "trace_start"
@@ -20,7 +20,7 @@ class TestTraceStartEnd:
             assert "tracer_version" in events[0]
 
     def test_trace_end_written_on_exit(self, trace_file: Path):
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             pass
         events = read_events(trace_file)
         assert events[-1]["type"] == "trace_end"
@@ -28,7 +28,7 @@ class TestTraceStartEnd:
         assert "stats" in events[-1]
 
     def test_trace_end_stats_accurate(self, trace_file: Path):
-        with Tracer(trace_file) as tracer:
+        with Tracer(path=trace_file) as tracer:
             tracer.log("evt1", {"a": 1})
             tracer.log("evt2", {"b": 2})
             with tracer.span(
@@ -50,7 +50,7 @@ class TestTraceStartEnd:
         assert stats["total_output_tokens"] == 5
 
     def test_trace_end_token_accumulation(self, trace_file: Path):
-        with Tracer(trace_file) as tracer:
+        with Tracer(path=trace_file) as tracer:
             with tracer.span(
                 "call1",
                 metadata={"token_usage": {"input_tokens": 100, "output_tokens": 50}},
@@ -71,13 +71,13 @@ class TestTraceStartEnd:
 
 class TestMetadata:
     def test_metadata_in_trace_start(self, trace_file: Path):
-        with Tracer(trace_file, metadata={"run_id": "abc", "model": "gpt-5"}):
+        with Tracer(path=trace_file, metadata={"run_id": "abc", "model": "gpt-5"}):
             pass
         events = read_events(trace_file)
         assert events[0]["metadata"] == {"run_id": "abc", "model": "gpt-5"}
 
     def test_metadata_empty_by_default(self, trace_file: Path):
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             pass
         events = read_events(trace_file)
         assert "metadata" not in events[0]
@@ -85,7 +85,7 @@ class TestMetadata:
 
 class TestLogEvent:
     def test_log_event(self, trace_file: Path):
-        with Tracer(trace_file) as tracer:
+        with Tracer(path=trace_file) as tracer:
             tracer.log("checkpoint", {"count": 42})
         events = read_events(trace_file)
         evt = [e for e in events if e["type"] == "event"][0]
@@ -95,7 +95,7 @@ class TestLogEvent:
         assert "ts" in evt
 
     def test_log_event_no_data(self, trace_file: Path):
-        with Tracer(trace_file) as tracer:
+        with Tracer(path=trace_file) as tracer:
             tracer.log("ping")
         events = read_events(trace_file)
         evt = [e for e in events if e["type"] == "event"][0]
@@ -108,7 +108,7 @@ class TestSpanMetadata:
 
     def test_span_with_llm_metadata(self, trace_file: Path):
         with (
-            Tracer(trace_file) as tracer,
+            Tracer(path=trace_file) as tracer,
             tracer.span(
                 "chat",
                 input=[{"role": "user", "content": "hello"}],
@@ -134,7 +134,7 @@ class TestSpanMetadata:
         }
 
     def test_span_metadata_set_during_execution(self, trace_file: Path):
-        with Tracer(trace_file) as tracer, tracer.span("step") as span:
+        with Tracer(path=trace_file) as tracer, tracer.span("step") as span:
             span.set_metadata("model", "claude-4")
             span.set_metadata("token_usage", {"input_tokens": 50, "output_tokens": 25})
         events = read_events(trace_file)
@@ -143,7 +143,7 @@ class TestSpanMetadata:
         assert end["metadata"]["token_usage"]["input_tokens"] == 50
 
     def test_kind_field_written(self, trace_file: Path):
-        with Tracer(trace_file) as tracer:
+        with Tracer(path=trace_file) as tracer:
             with tracer.span("retrieval", kind="retriever"):
                 pass
         events = read_events(trace_file)
@@ -153,7 +153,7 @@ class TestSpanMetadata:
         assert end["kind"] == "retriever"
 
     def test_kind_omitted_when_none(self, trace_file: Path):
-        with Tracer(trace_file) as tracer, tracer.span("plain_step"):
+        with Tracer(path=trace_file) as tracer, tracer.span("plain_step"):
             pass
         events = read_events(trace_file)
         start = [e for e in events if e["type"] == "span_start"][0]
@@ -164,7 +164,7 @@ class TestSpanMetadata:
 
 class TestSpan:
     def test_span_start_end(self, trace_file: Path):
-        with Tracer(trace_file) as tracer:
+        with Tracer(path=trace_file) as tracer:
             with tracer.span("my_step", input={"key": "val"}):
                 pass
         events = read_events(trace_file)
@@ -178,7 +178,7 @@ class TestSpan:
         assert ends[0]["id"] == starts[0]["id"]
 
     def test_span_error(self, trace_file: Path):
-        with Tracer(trace_file) as tracer:
+        with Tracer(path=trace_file) as tracer:
             with pytest.raises(ValueError, match="boom"):
                 with tracer.span("failing"):
                     raise ValueError("boom")
@@ -189,7 +189,7 @@ class TestSpan:
         assert end["error"]["message"] == "boom"
 
     def test_nested_spans_parent_ids(self, trace_file: Path):
-        with Tracer(trace_file) as tracer, tracer.span("outer") as outer:
+        with Tracer(path=trace_file) as tracer, tracer.span("outer") as outer:
             with tracer.span("inner"):
                 pass
         events = read_events(trace_file)
@@ -199,7 +199,7 @@ class TestSpan:
         assert inner_start["parent_id"] == outer.id
 
     def test_span_yields_span_object(self, trace_file: Path):
-        with Tracer(trace_file) as tracer, tracer.span("test") as span:
+        with Tracer(path=trace_file) as tracer, tracer.span("test") as span:
             assert hasattr(span, "id")
             assert hasattr(span, "name")
             assert span.name == "test"
@@ -211,7 +211,7 @@ class TestSpan:
         assert end["metadata"]["key"] == "value"
 
     def test_span_update_metadata(self, trace_file: Path):
-        with Tracer(trace_file) as tracer, tracer.span("test") as span:
+        with Tracer(path=trace_file) as tracer, tracer.span("test") as span:
             span.update_metadata({"a": 1, "b": 2})
             span.set_metadata("c", 3)
         events = read_events(trace_file)
@@ -224,11 +224,11 @@ class TestGetTracer:
         assert get_tracer() is None
 
     def test_get_tracer_inside_context(self, trace_file: Path):
-        with Tracer(trace_file) as tracer:
+        with Tracer(path=trace_file) as tracer:
             assert get_tracer() is tracer
 
     def test_get_tracer_after_exit(self, trace_file: Path):
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             pass
         assert get_tracer() is None
 
@@ -236,7 +236,7 @@ class TestGetTracer:
 class TestCaptureContent:
     def test_span_input_always_written(self, trace_file: Path):
         """Span input is controlled by the caller, not capture_content."""
-        with Tracer(trace_file, capture_content=False) as tracer:
+        with Tracer(path=trace_file, capture_content=False) as tracer:
             with tracer.span("step", input={"data": "visible"}):
                 pass
         events = read_events(trace_file)
@@ -246,25 +246,25 @@ class TestCaptureContent:
 
 class TestTraceInputOutput:
     def test_trace_input_in_trace_start(self, trace_file: Path):
-        with Tracer(trace_file, input={"query": "hello"}):
+        with Tracer(path=trace_file, input={"query": "hello"}):
             pass
         events = read_events(trace_file)
         assert events[0]["input"] == {"query": "hello"}
 
     def test_trace_output_in_trace_end(self, trace_file: Path):
-        with Tracer(trace_file) as tracer:
+        with Tracer(path=trace_file) as tracer:
             tracer.set_output({"response": "world"})
         events = read_events(trace_file)
         assert events[-1]["output"] == {"response": "world"}
 
     def test_trace_no_input_omitted(self, trace_file: Path):
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             pass
         events = read_events(trace_file)
         assert "input" not in events[0]
 
     def test_trace_no_output_omitted(self, trace_file: Path):
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             pass
         events = read_events(trace_file)
         assert "output" not in events[-1]
@@ -272,19 +272,19 @@ class TestTraceInputOutput:
 
 class TestTags:
     def test_trace_tags(self, trace_file: Path):
-        with Tracer(trace_file, tags=["production", "chatbot"]):
+        with Tracer(path=trace_file, tags=["production", "chatbot"]):
             pass
         events = read_events(trace_file)
         assert events[0]["tags"] == ["production", "chatbot"]
 
     def test_trace_no_tags_omitted(self, trace_file: Path):
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             pass
         events = read_events(trace_file)
         assert "tags" not in events[0]
 
     def test_span_tags(self, trace_file: Path):
-        with Tracer(trace_file) as tracer:
+        with Tracer(path=trace_file) as tracer:
             with tracer.span("classify", tags=["llm", "gpt-4o"]):
                 pass
         events = read_events(trace_file)
@@ -294,7 +294,7 @@ class TestTags:
         assert end["tags"] == ["llm", "gpt-4o"]
 
     def test_span_no_tags_omitted(self, trace_file: Path):
-        with Tracer(trace_file) as tracer, tracer.span("step"):
+        with Tracer(path=trace_file) as tracer, tracer.span("step"):
             pass
         events = read_events(trace_file)
         start = [e for e in events if e["type"] == "span_start"][0]
@@ -303,7 +303,7 @@ class TestTags:
         assert "tags" not in end
 
     def test_span_tags_on_error(self, trace_file: Path):
-        with Tracer(trace_file) as tracer, pytest.raises(ValueError):
+        with Tracer(path=trace_file) as tracer, pytest.raises(ValueError):
             with tracer.span("failing", tags=["important"]):
                 raise ValueError("boom")
         events = read_events(trace_file)
@@ -316,7 +316,7 @@ class TestTags:
         def login(user: str) -> bool:
             return True
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             login("alice")
 
         events = read_events(trace_file)
@@ -326,13 +326,13 @@ class TestTags:
 
 class TestThreadId:
     def test_thread_id_in_trace_start(self, trace_file: Path):
-        with Tracer(trace_file, thread_id="conv-123"):
+        with Tracer(path=trace_file, thread_id="conv-123"):
             pass
         events = read_events(trace_file)
         assert events[0]["thread_id"] == "conv-123"
 
     def test_thread_id_omitted_when_none(self, trace_file: Path):
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             pass
         events = read_events(trace_file)
         assert "thread_id" not in events[0]
@@ -343,7 +343,7 @@ class TestGetCurrentSpan:
         assert get_current_span() is None
 
     def test_get_current_span_inside_span(self, trace_file: Path):
-        with Tracer(trace_file) as tracer:
+        with Tracer(path=trace_file) as tracer:
             assert get_current_span() is None
             with tracer.span("outer") as outer:
                 assert get_current_span() is outer
@@ -362,7 +362,7 @@ class TestGetCurrentSpan:
             captured_span.set_metadata("custom", "value")
             return "done"
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             my_fn()
 
         assert captured_span is not None
@@ -383,6 +383,89 @@ class TestGetCurrentSpan:
 class TestCreatesDirs:
     def test_creates_parent_dirs(self, tmp_path: Path):
         deep = tmp_path / "a" / "b" / "c" / "trace.jsonl"
-        with Tracer(deep):
+        with Tracer(path=deep):
             pass
         assert deep.exists()
+
+
+class TestAutoPath:
+    def test_name_only_creates_file(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setenv("TRAQO_TRACE_DIR", str(tmp_path))
+        with Tracer("my_experiment"):
+            pass
+        files = list(tmp_path.glob("my_experiment_*.jsonl"))
+        assert len(files) == 1
+
+    def test_no_args_creates_file(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setenv("TRAQO_TRACE_DIR", str(tmp_path))
+        with Tracer():
+            pass
+        files = list(tmp_path.glob("*.jsonl"))
+        assert len(files) == 1
+
+    def test_name_in_trace_start(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setenv("TRAQO_TRACE_DIR", str(tmp_path))
+        with Tracer("my_experiment"):
+            pass
+        files = list(tmp_path.glob("my_experiment_*.jsonl"))
+        events = read_events(files[0])
+        assert events[0]["type"] == "trace_start"
+        assert events[0]["name"] == "my_experiment"
+
+    def test_auto_path_with_backends_cleans_up(self, tmp_path: Path):
+        from traqo.backend import flush_backends
+
+        completed = []
+
+        class TestBackend:
+            def on_event(self, event):
+                pass
+
+            def on_trace_complete(self, trace_path):
+                completed.append(trace_path)
+                return None
+
+            def close(self):
+                pass
+
+        with Tracer("ephemeral", trace_dir=tmp_path, backends=[TestBackend()]):
+            pass
+
+        flush_backends()
+        # Buffer file should be cleaned up
+        files = list(tmp_path.glob("ephemeral_*.jsonl"))
+        assert len(files) == 0
+        assert len(completed) == 1
+
+    def test_explicit_path_not_cleaned_up(self, tmp_path: Path):
+        from traqo.backend import flush_backends
+
+        class TestBackend:
+            def on_event(self, event):
+                pass
+
+            def on_trace_complete(self, trace_path):
+                return None
+
+            def close(self):
+                pass
+
+        path = tmp_path / "keep_me.jsonl"
+        with Tracer(path=path, backends=[TestBackend()]):
+            pass
+
+        flush_backends()
+        assert path.exists()
+
+    def test_auto_path_no_backends_not_cleaned_up(self, tmp_path: Path):
+        with Tracer("keep_this", trace_dir=tmp_path):
+            pass
+        files = list(tmp_path.glob("keep_this_*.jsonl"))
+        assert len(files) == 1
+
+    def test_trace_dir_kwarg(self, tmp_path: Path):
+        custom_dir = tmp_path / "custom"
+        with Tracer("experiment", trace_dir=custom_dir):
+            pass
+        files = list(custom_dir.glob("experiment_*.jsonl"))
+        assert len(files) == 1

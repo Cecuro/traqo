@@ -82,7 +82,7 @@ class TestSlottedDataclassSerialization:
         """Slotted dataclass used as span input should appear as dict in JSONL."""
         path = tmp_path / "trace.jsonl"
         point = SlottedPoint(5, 6)
-        with Tracer(path) as tracer, tracer.span("test", input=point):
+        with Tracer(path=path) as tracer, tracer.span("test", input=point):
             pass
         events = _read_events(path)
         span_start = next(e for e in events if e["type"] == "span_start")
@@ -102,14 +102,14 @@ class TestContextVarResetOnCloseError:
     def test_contextvar_reset_on_normal_exit(self, tmp_path):
         """Baseline: ContextVar is properly reset on normal exit."""
         path = tmp_path / "trace.jsonl"
-        with Tracer(path):
+        with Tracer(path=path):
             assert get_tracer() is not None
         assert get_tracer() is None
 
     def test_contextvar_reset_when_close_raises(self, tmp_path):
         """If file.close() raises, _active_tracer should still be reset."""
         path = tmp_path / "trace.jsonl"
-        tracer = Tracer(path)
+        tracer = Tracer(path=path)
         tracer.__enter__()
 
         assert get_tracer() is tracer
@@ -150,7 +150,7 @@ class TestAbandonedSpanContext:
     def test_normal_span_pops_from_stack(self, tmp_path):
         """Baseline: normally-exited spans are removed from the stack."""
         path = tmp_path / "trace.jsonl"
-        with Tracer(path) as tracer:
+        with Tracer(path=path) as tracer:
             assert _span_stack.get(()) == ()
             with tracer.span("normal"):
                 assert len(_span_stack.get(())) == 1
@@ -159,7 +159,7 @@ class TestAbandonedSpanContext:
     def test_abandoned_span_stays_on_stack(self, tmp_path):
         """Manually entering a span without exiting leaves it on the stack."""
         path = tmp_path / "trace.jsonl"
-        with Tracer(path) as tracer:
+        with Tracer(path=path) as tracer:
             span_ctx = tracer.span("abandoned")
             orphan = span_ctx.__enter__()
 
@@ -184,7 +184,7 @@ class TestAbandonedSpanContext:
         path2 = tmp_path / "t2.jsonl"
 
         # Create orphan in tracer 1
-        with Tracer(path1) as t1:
+        with Tracer(path=path1) as t1:
             span_ctx = t1.span("orphan")
             orphan = span_ctx.__enter__()
             orphan_id = orphan.id
@@ -195,7 +195,7 @@ class TestAbandonedSpanContext:
         assert len(stack) == 1, "Orphaned span should survive tracer exit"
 
         # Tracer 2 is contaminated: its spans get a parent_id from tracer 1
-        with Tracer(path2) as t2, t2.span("innocent") as s:
+        with Tracer(path=path2) as t2, t2.span("innocent") as s:
             assert s.parent_id == orphan_id, (
                 "Cross-tracer contamination: span in t2 has parent from t1"
             )
@@ -297,7 +297,7 @@ class TestLangChainCallbackRunsLeak:
         callback = TraqoCallback()
         path = tmp_path / "trace.jsonl"
 
-        with Tracer(path):
+        with Tracer(path=path):
             # Fire 50 start callbacks with no matching end
             run_ids = []
             for _ in range(50):
@@ -332,7 +332,7 @@ class TestLangChainCallbackRunsLeak:
         callback = TraqoCallback()
         path = tmp_path / "trace.jsonl"
 
-        with Tracer(path):
+        with Tracer(path=path):
             rid = uuid4()
             callback.on_chat_model_start(
                 serialized={
@@ -379,7 +379,7 @@ class TestNoTOCTOURace:
             return 42
 
         path = tmp_path / "trace.jsonl"
-        with Tracer(path) as tracer:
+        with Tracer(path=path) as tracer:
             result = func()
 
         assert result == 42

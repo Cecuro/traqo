@@ -114,7 +114,7 @@ class TestMessagesCreateTextResponse:
 
         traced = _TracedMessages(mock_messages, "")
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             result = traced.create(
                 model="claude-3-sonnet-20240229",
                 messages=[{"role": "user", "content": "Hi"}],
@@ -159,7 +159,7 @@ class TestMessagesCreateCacheTokens:
 
         traced = _TracedMessages(mock_messages, "")
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             traced.create(
                 model="claude-3-sonnet-20240229",
                 messages=[{"role": "user", "content": "Hi"}],
@@ -188,7 +188,7 @@ class TestMessagesCreateToolUse:
 
         traced = _TracedMessages(mock_messages, "")
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             traced.create(
                 model="claude-3-sonnet-20240229",
                 messages=[{"role": "user", "content": "What's the weather?"}],
@@ -214,7 +214,7 @@ class TestMessagesCreateCaptureContentFalse:
 
         traced = _TracedMessages(mock_messages, "")
 
-        with Tracer(trace_file, capture_content=False):
+        with Tracer(path=trace_file, capture_content=False):
             traced.create(
                 model="claude-3-sonnet-20240229",
                 messages=[{"role": "user", "content": "secret input"}],
@@ -239,7 +239,7 @@ class TestMessagesCreateSystemMessage:
 
         traced = _TracedMessages(mock_messages, "")
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             traced.create(
                 model="claude-3-sonnet-20240229",
                 messages=[{"role": "user", "content": "Hi"}],
@@ -267,7 +267,7 @@ class TestMessagesStreaming:
 
         traced = _TracedMessages(mock_messages, "")
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             stream = traced.create(
                 model="claude-3-sonnet-20240229",
                 messages=[{"role": "user", "content": "Hi"}],
@@ -306,7 +306,7 @@ class TestMessagesStreamMethod:
 
         traced = _TracedMessages(mock_messages, "")
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             stream = traced.stream(
                 model="claude-3-haiku-20240307",
                 messages=[{"role": "user", "content": "Hi"}],
@@ -381,7 +381,7 @@ class TestStreamingToolUseAggregation:
 
         traced = _TracedMessages(mock_messages, "")
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             stream = traced.create(
                 model="claude-3-sonnet-20240229",
                 messages=[{"role": "user", "content": "What's the weather?"}],
@@ -408,7 +408,7 @@ class TestStreamingErrors:
 
         traced = _TracedMessages(mock_messages, "")
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             with pytest.raises(ConnectionError, match="API unavailable"):
                 traced.create(
                     model="claude-3-sonnet-20240229",
@@ -449,7 +449,7 @@ class TestTracedAnthropicEndToEnd:
 
         traced_client = traced_anthropic(mock_client)
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             result = traced_client.messages.create(
                 model="claude-3-opus-20240229",
                 messages=[{"role": "user", "content": "Hello"}],
@@ -478,7 +478,7 @@ class TestAsyncMessages:
 
         traced = _TracedAsyncMessages(mock_messages, "")
 
-        async with Tracer(trace_file):
+        async with Tracer(path=trace_file):
             result = await traced.create(
                 model="claude-3-sonnet-20240229",
                 messages=[{"role": "user", "content": "Hi"}],

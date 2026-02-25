@@ -12,7 +12,7 @@ class TestDisable:
     def test_disable_prevents_file_creation(self, tmp_path: Path):
         path = tmp_path / "should_not_exist.jsonl"
         traqo.disable()
-        with Tracer(path):
+        with Tracer(path=path):
             pass
         assert not path.exists()
 
@@ -22,7 +22,7 @@ class TestDisable:
             return a + b
 
         traqo.disable()
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             result = add(1, 2)
 
         assert result == 3
@@ -30,14 +30,14 @@ class TestDisable:
 
     def test_disable_get_tracer_returns_none(self, trace_file: Path):
         traqo.disable()
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             assert get_tracer() is None
 
     def test_enable_after_disable(self, trace_file: Path):
         traqo.disable()
         assert get_tracer() is None
         traqo.enable()
-        with Tracer(trace_file) as t:
+        with Tracer(path=trace_file) as t:
             assert get_tracer() is t
 
     def test_env_var_disable(self, monkeypatch, tmp_path: Path):
@@ -48,7 +48,7 @@ class TestDisable:
         """
         traqo._disabled = True
         path = tmp_path / "env_test.jsonl"
-        with Tracer(path):
+        with Tracer(path=path):
             assert get_tracer() is None
         assert not path.exists()
         traqo._disabled = False

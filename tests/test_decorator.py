@@ -16,7 +16,7 @@ class TestSyncDecorator:
         def add(a: int, b: int) -> int:
             return a + b
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             result = add(1, 2)
 
         assert result == 3
@@ -35,7 +35,7 @@ class TestSyncDecorator:
         def fail():
             raise RuntimeError("oops")
 
-        with Tracer(trace_file), pytest.raises(RuntimeError, match="oops"):
+        with Tracer(path=trace_file), pytest.raises(RuntimeError, match="oops"):
             fail()
 
         events = read_events(trace_file)
@@ -48,7 +48,7 @@ class TestSyncDecorator:
         def do_stuff():
             return 42
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             do_stuff()
 
         events = read_events(trace_file)
@@ -60,7 +60,7 @@ class TestSyncDecorator:
         def secret_fn(password: str) -> str:
             return "ok"
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             secret_fn("hunter2")
 
         events = read_events(trace_file)
@@ -72,7 +72,7 @@ class TestSyncDecorator:
         def fn() -> str:
             return "sensitive"
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             fn()
 
         events = read_events(trace_file)
@@ -84,7 +84,7 @@ class TestSyncDecorator:
         def login(user: str) -> bool:
             return True
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             login("alice")
 
         events = read_events(trace_file)
@@ -99,7 +99,7 @@ class TestSyncDecorator:
         def search(query: str) -> str:
             return "results"
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             search("hello")
 
         events = read_events(trace_file)
@@ -115,7 +115,7 @@ class TestAsyncDecorator:
         async def async_add(a: int, b: int) -> int:
             return a + b
 
-        async with Tracer(trace_file):
+        async with Tracer(path=trace_file):
             result = await async_add(3, 4)
 
         assert result == 7
@@ -132,7 +132,7 @@ class TestAsyncDecorator:
         async def async_fail():
             raise ValueError("async boom")
 
-        async with Tracer(trace_file):
+        async with Tracer(path=trace_file):
             with pytest.raises(ValueError, match="async boom"):
                 await async_fail()
 
@@ -145,7 +145,7 @@ class TestAsyncDecorator:
         async def chat(prompt: str) -> str:
             return "response"
 
-        async with Tracer(trace_file):
+        async with Tracer(path=trace_file):
             await chat("hello")
 
         events = read_events(trace_file)
@@ -164,7 +164,7 @@ class TestNesting:
         def inner():
             return 42
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             outer()
 
         events = read_events(trace_file)
@@ -185,7 +185,7 @@ class TestNesting:
         async def step():
             return "done"
 
-        async with Tracer(trace_file):
+        async with Tracer(path=trace_file):
             await pipeline()
 
         events = read_events(trace_file)
@@ -223,7 +223,7 @@ class TestSelfExclusion:
             def method(self, x: int) -> int:
                 return x * 2
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             MyClass().method(5)
 
         events = read_events(trace_file)
@@ -238,7 +238,7 @@ class TestIgnoreArguments:
         def login(user: str, password: str) -> bool:
             return True
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             login("alice", "secret123")
 
         events = read_events(trace_file)
@@ -251,7 +251,7 @@ class TestIgnoreArguments:
         def call_api(url: str, api_key: str, token: str) -> str:
             return "ok"
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             call_api("https://example.com", "key123", "tok456")
 
         events = read_events(trace_file)
@@ -265,7 +265,7 @@ class TestIgnoreArguments:
         def fn(x: int) -> int:
             return x
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             result = fn(42)
 
         assert result == 42
@@ -278,7 +278,7 @@ class TestIgnoreArguments:
         async def fetch(url: str, secret: str) -> str:
             return "data"
 
-        async with Tracer(trace_file):
+        async with Tracer(path=trace_file):
             result = await fetch("https://example.com", "s3cr3t")
 
         assert result == "data"
@@ -294,7 +294,7 @@ class TestGeneratorDecorator:
         def count(n: int):
             yield from range(n)
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             items = list(count(3))
 
         assert items == [0, 1, 2]
@@ -321,7 +321,7 @@ class TestGeneratorDecorator:
         def count(n: int):
             yield from range(n)
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             items = list(count(3))
 
         assert items == [0, 1, 2]
@@ -335,7 +335,7 @@ class TestGeneratorDecorator:
             return
             yield
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             items = list(empty())
 
         assert items == []
@@ -349,7 +349,7 @@ class TestGeneratorDecorator:
             for i in range(n):
                 yield i
 
-        async with Tracer(trace_file):
+        async with Tracer(path=trace_file):
             items = [item async for item in acount(3)]
 
         assert items == [0, 1, 2]
@@ -377,7 +377,7 @@ class TestGeneratorDecorator:
         def gen(n: int, secret: str):
             yield from range(n)
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             items = list(gen(2, "hidden"))
 
         assert items == [0, 1]
@@ -393,7 +393,7 @@ class TestGeneratorDecorator:
             yield 2
             raise ValueError("mid-yield error")
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             with pytest.raises(ValueError, match="mid-yield error"):
                 list(failing_gen())
 
@@ -410,7 +410,7 @@ class TestGeneratorDecorator:
             yield 2
             raise ValueError("async mid-yield error")
 
-        async with Tracer(trace_file):
+        async with Tracer(path=trace_file):
             with pytest.raises(ValueError, match="async mid-yield error"):
                 _ = [item async for item in failing_async_gen()]
 

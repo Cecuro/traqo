@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from concurrent.futures import Future
 from pathlib import Path
 from typing import Any
 
@@ -55,8 +56,8 @@ class GCSBackend:
     def on_event(self, event: dict[str, Any]) -> None:
         pass
 
-    def on_trace_complete(self, trace_path: Path) -> None:
-        submit_background(self._upload, trace_path)
+    def on_trace_complete(self, trace_path: Path) -> Future | None:
+        return submit_background(self._upload, trace_path)
 
     def close(self) -> None:
         pass

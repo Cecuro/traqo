@@ -34,7 +34,8 @@ def main():
     backend = LocalBackend(collected_dir, organize_by_date=True)
 
     with Tracer(
-        os.path.join(traces_dir, "run.jsonl"),
+        "run",
+        trace_dir=traces_dir,
         input={"query": "demo"},
         backends=[backend],
     ) as tracer:
@@ -50,7 +51,7 @@ def main():
         tracer.set_output({"answer": "Generated answer."})
 
     # Show what was collected
-    print("Original trace:", os.path.join(traces_dir, "run.jsonl"))
+    print("Original trace:", tracer._path)
     print()
     print("Collected copies:")
     for root, _, files in os.walk(collected_dir):

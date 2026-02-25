@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import os
 import sys
 import threading
 import uuid
 from collections.abc import Sequence
+from concurrent.futures import Future
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
@@ -107,8 +110,10 @@ class Tracer:
 
     def __init__(
         self,
-        path: Path,
+        name: str | None = None,
         *,
+        path: Path | str | None = None,
+        trace_dir: Path | str | None = None,
         input: Any = None,
         metadata: dict[str, Any] | None = None,
         tags: list[str] | None = None,
@@ -118,7 +123,8 @@ class Tracer:
     ) -> None:
         import traqo
 
-        self._path = Path(path)
+        self._name = name
+        self._path, self._auto_path = self._resolve_path(name, path, trace_dir)
         self._input = input
         self._metadata = metadata or {}
         self._tags = tags or []
@@ -151,6 +157,32 @@ class Tracer:
         # Child tracer linkage (set by child())
         self._parent: Tracer | None = None
         self._child_name: str = ""
+
+    @staticmethod
+    def _resolve_path(
+        name: str | None,
+        path: Path | str | None,
+        trace_dir: Path | str | None,
+    ) -> tuple[Path, bool]:
+        """Return (resolved_path, auto_path)."""
+        if path is not None:
+            return Path(path), False
+        base = (
+            Path(trace_dir)
+            if trace_dir
+            else Path(os.environ.get("TRAQO_TRACE_DIR", "./traces"))
+        )
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        short_id = uuid.uuid4().hex[:8]
+        if name:
+            # Sanitize: replace path separators and limit length for filesystem safety
+            safe = name.replace("/", "_").replace("\\", "_").replace("\0", "")
+            if len(safe) > 200:
+                safe = safe[:200]
+            stem = f"{safe}_{ts}_{short_id}"
+        else:
+            stem = f"{ts}_{short_id}"
+        return base / f"{stem}.jsonl", True
 
     @property
     def capture_content(self) -> bool:
@@ -219,19 +251,44 @@ class Tracer:
                     exc_info=True,
                 )
 
-    def _notify_backends_complete(self) -> None:
-        """Notify all backends that the trace file is complete. Never raises."""
+    def _notify_backends_complete(self) -> list[Future]:
+        """Notify all backends that the trace file is complete. Returns futures."""
+        futures: list[Future] = []
         if self._disabled or not self._backends:
-            return
+            return futures
         for backend in self._backends:
             try:
-                backend.on_trace_complete(self._path)
+                result = backend.on_trace_complete(self._path)
+                if result is not None:
+                    futures.append(result)
             except Exception:
                 logger.warning(
                     "traqo: backend on_trace_complete failed for %s",
                     type(backend).__name__,
                     exc_info=True,
                 )
+        return futures
+
+    def _schedule_cleanup(self, upload_futures: list[Future]) -> None:
+        """Delete the auto-generated buffer file after backends finish uploading."""
+        if not self._auto_path or not self._backends:
+            return
+        from traqo.backend import submit_background
+
+        path = self._path
+
+        def _wait_and_delete():
+            for fut in upload_futures:
+                with contextlib.suppress(Exception):
+                    fut.result(timeout=600)
+            try:
+                path.unlink(missing_ok=True)
+            except Exception:
+                logger.warning(
+                    "traqo: failed to clean up buffer %s", path, exc_info=True
+                )
+
+        submit_background(_wait_and_delete)
 
     def _accumulate_tokens(self, span_obj: Span) -> None:
         """If span metadata contains token_usage, accumulate into tracer stats."""
@@ -250,6 +307,8 @@ class Tracer:
             "ts": self._start_time.isoformat(),
             "tracer_version": __version__,
         }
+        if self._name:
+            start_event["name"] = self._name
         if self._input is not None:
             start_event["input"] = self._input
         if self._metadata:
@@ -293,7 +352,8 @@ class Tracer:
         self._write(end_event)
         try:
             self._close()
-            self._notify_backends_complete()
+            futures = self._notify_backends_complete()
+            self._schedule_cleanup(futures)
         finally:
             if self._token is not None:
                 _active_tracer.reset(self._token)
@@ -428,31 +488,39 @@ class Tracer:
     def child(
         self,
         name: str,
-        path: Path | None = None,
         *,
+        path: Path | str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> Tracer:
         """Create a child tracer writing to a separate file.
 
         Args:
             name: Child tracer name (used in parent events and default filename).
-            path: JSONL file path. Defaults to ``parent_dir/{name}.jsonl``.
+            path: JSONL file path. If not given, an auto-generated path is used
+                  in the same directory as the parent trace.
             metadata: Extra metadata merged into the child's trace_start event.
                       ``parent_trace`` is always included automatically.
         """
-        if path is None:
-            path = self._path.parent / f"{name}.jsonl"
-
         merged_metadata: dict[str, Any] = {"parent_trace": str(self._path)}
         if metadata:
             merged_metadata.update(metadata)
 
-        child_tracer = Tracer(
-            path,
-            metadata=merged_metadata,
-            capture_content=self._capture_content,
-            backends=self._backends,
-        )
+        if path is not None:
+            child_tracer = Tracer(
+                name,
+                path=path,
+                metadata=merged_metadata,
+                capture_content=self._capture_content,
+                backends=self._backends,
+            )
+        else:
+            child_tracer = Tracer(
+                name,
+                trace_dir=self._path.parent,
+                metadata=merged_metadata,
+                capture_content=self._capture_content,
+                backends=self._backends,
+            )
         child_tracer._parent = self
         child_tracer._child_name = name
         return child_tracer
@@ -556,8 +624,9 @@ def update_current_span(
 
 def subtrace(
     name: str,
-    path: Path | None = None,
+    path: Path | str | None = None,
     *,
+    trace_dir: Path | str | None = None,
     metadata: dict[str, Any] | None = None,
     backends: Sequence[Backend] | None = None,
 ) -> Tracer:
@@ -566,32 +635,25 @@ def subtrace(
     This handles the common pattern where a sub-unit of work (e.g. an agent)
     may run inside a parent trace or standalone::
 
-        with subtrace("my_agent", log_dir / "my_agent.jsonl"):
+        with subtrace("my_agent"):
             await agent.run(...)
 
     When a parent tracer is active, ``path`` and ``backends`` are inherited from
     the parent (and any explicit values are ignored). When no parent is active,
-    ``path`` is required.
+    a path is auto-generated from the name.
 
     Args:
         name: Name for the child tracer / trace session.
-        path: JSONL file path. Required when no parent tracer is active.
+        path: JSONL file path. When not given, auto-generated from *name*.
               Ignored when a parent exists (child derives path from parent).
+        trace_dir: Directory for auto-generated paths. Only used when no parent.
         metadata: Extra metadata for the trace_start event.
         backends: Backends for uploading traces. Only used when no parent
                   (children inherit parent backends).
     """
-    import traqo
-
     parent = get_tracer()
     if parent is not None:
         return parent.child(name, metadata=metadata)
-    if path is None:
-        if traqo._disabled:
-            # When disabled, path doesn't matter — Tracer won't write anything
-            path = Path(f"{name}.jsonl")
-        else:
-            raise ValueError(
-                f"subtrace({name!r}): path is required when no parent tracer is active"
-            )
-    return Tracer(path, metadata=metadata, backends=backends)
+    return Tracer(
+        name, path=path, trace_dir=trace_dir, metadata=metadata, backends=backends
+    )

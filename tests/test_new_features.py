@@ -35,7 +35,7 @@ class TestBareTrace:
         def add(a: int, b: int) -> int:
             return a + b
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             result = add(1, 2)
 
         assert result == 3
@@ -51,7 +51,7 @@ class TestBareTrace:
         def add(a: int, b: int) -> int:
             return a + b
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             add(1, 2)
 
         events = read_events(trace_file)
@@ -67,7 +67,7 @@ class TestBareTrace:
             return a + b
 
         async def run():
-            async with Tracer(trace_file):
+            async with Tracer(path=trace_file):
                 return await async_add(3, 4)
 
         result = asyncio.run(run())
@@ -83,7 +83,7 @@ class TestBareTrace:
         def gen(n: int):
             yield from range(n)
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             items = list(gen(3))
 
         assert items == [0, 1, 2]
@@ -112,7 +112,7 @@ class TestKindConstants:
         def chat(prompt: str) -> str:
             return "response"
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             chat("hello")
 
         events = read_events(trace_file)
@@ -127,7 +127,7 @@ class TestKindConstants:
 
 class TestUpdateCurrentSpan:
     def test_update_output(self, trace_file: Path):
-        with Tracer(trace_file) as tracer, tracer.span("test_span"):
+        with Tracer(path=trace_file) as tracer, tracer.span("test_span"):
             update_current_span(output="custom_output")
 
         events = read_events(trace_file)
@@ -139,7 +139,7 @@ class TestUpdateCurrentSpan:
         def fn():
             update_current_span(metadata={"key1": "val1", "key2": 42})
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             fn()
 
         events = read_events(trace_file)
@@ -152,7 +152,7 @@ class TestUpdateCurrentSpan:
         def fn():
             update_current_span(score=0.95, model="gpt-4")
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             fn()
 
         events = read_events(trace_file)
@@ -165,7 +165,7 @@ class TestUpdateCurrentSpan:
         def fn():
             update_current_span(tags=["new_tag"])
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             fn()
 
         events = read_events(trace_file)
@@ -184,7 +184,7 @@ class TestUpdateCurrentSpan:
         def fn():
             update_current_span(output=None)
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             fn()
 
         events = read_events(trace_file)
@@ -357,7 +357,7 @@ class TestOpenAIEmbeddings:
 
         traced = _TracedEmbeddings(mock_embeddings, "")
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             result = traced.create(input="hello world", model="text-embedding-ada-002")
 
         assert result == mock_response
@@ -411,7 +411,7 @@ class TestOpenAIResponses:
 
         traced = _TracedResponses(mock_responses, "")
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             result = traced.create(input="Hi", model="gpt-4")
 
         assert result == mock_response
@@ -448,7 +448,7 @@ class TestOpenAIResponses:
 
         traced = _TracedResponses(mock_responses, "")
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             traced.create(input="What's the weather?", model="gpt-4")
 
         events = read_events(trace_file)
@@ -631,7 +631,7 @@ class TestGeminiTracedModels:
 
         traced = _TracedModels(mock_models, "")
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             result = traced.generate_content(model="gemini-pro", contents="Hello")
 
         assert result == mock_response
@@ -694,7 +694,7 @@ class TestGeminiTracedModels:
 
         traced = _TracedModels(mock_models, "")
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             result = traced.embed_content(model="embedding-001", contents="Hello")
 
         assert result == mock_response

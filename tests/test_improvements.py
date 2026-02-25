@@ -21,10 +21,10 @@ class TestChildMetadata:
         parent_path = tmp_path / "parent.jsonl"
         child_path = tmp_path / "child.jsonl"
 
-        with Tracer(parent_path) as parent:
+        with Tracer(path=parent_path) as parent:
             child = parent.child(
                 "agent_a",
-                child_path,
+                path=child_path,
                 metadata={"agent_id": "agent_a", "phase": "validation"},
             )
             with child:
@@ -40,8 +40,8 @@ class TestChildMetadata:
         parent_path = tmp_path / "parent.jsonl"
         child_path = tmp_path / "child.jsonl"
 
-        with Tracer(parent_path) as parent:
-            child = parent.child("agent_a", child_path, metadata=None)
+        with Tracer(path=parent_path) as parent:
+            child = parent.child("agent_a", path=child_path, metadata=None)
             with child:
                 pass
 
@@ -55,9 +55,9 @@ class TestChildMetadata:
         parent_path = tmp_path / "parent.jsonl"
         child_path = tmp_path / "child.jsonl"
 
-        with Tracer(parent_path) as parent:
+        with Tracer(path=parent_path) as parent:
             child = parent.child(
-                "agent_a", child_path, metadata={"parent_trace": "custom"}
+                "agent_a", path=child_path, metadata={"parent_trace": "custom"}
             )
             with child:
                 pass
@@ -75,14 +75,14 @@ class TestSubtrace:
     def test_subtrace_with_parent_creates_child(self, tmp_path: Path):
         parent_path = tmp_path / "parent.jsonl"
 
-        with Tracer(parent_path):
+        with Tracer(path=parent_path):
             child_tracer = subtrace("agent_a")
             with child_tracer:
                 assert get_tracer() is child_tracer
 
-        # Child file should exist at parent_dir/agent_a.jsonl
-        child_path = tmp_path / "agent_a.jsonl"
-        assert child_path.exists()
+        # Child file should exist at parent_dir/agent_a_*.jsonl
+        child_files = list(tmp_path.glob("agent_a_*.jsonl"))
+        assert len(child_files) == 1
 
         # Parent should have child events
         parent_events = read_events(parent_path)
@@ -102,19 +102,23 @@ class TestSubtrace:
         assert events[0]["type"] == "trace_start"
         assert events[-1]["type"] == "trace_end"
 
-    def test_subtrace_without_parent_requires_path(self):
-        with pytest.raises(ValueError, match="path is required"):
-            subtrace("agent")
+    def test_subtrace_without_parent_auto_generates(self, tmp_path: Path):
+        with subtrace("agent", trace_dir=tmp_path):
+            tracer = get_tracer()
+            assert tracer is not None
+        files = list(tmp_path.glob("agent_*.jsonl"))
+        assert len(files) == 1
 
     def test_subtrace_passes_metadata_to_child(self, tmp_path: Path):
         parent_path = tmp_path / "parent.jsonl"
 
-        with Tracer(parent_path):
+        with Tracer(path=parent_path):
             with subtrace("agent_a", metadata={"custom": "value"}):
                 pass
 
-        child_path = tmp_path / "agent_a.jsonl"
-        child_events = read_events(child_path)
+        child_files = list(tmp_path.glob("agent_a_*.jsonl"))
+        assert len(child_files) == 1
+        child_events = read_events(child_files[0])
         meta = child_events[0]["metadata"]
         assert meta["parent_trace"] == str(parent_path)
         assert meta["custom"] == "value"
@@ -142,7 +146,7 @@ class TestSubtrace:
             def close(self):
                 pass
 
-        with subtrace("agent", path, backends=[TestBackend()]):
+        with subtrace("agent", path=path, backends=[TestBackend()]):
             pass
 
         assert len(completed) == 1
@@ -169,8 +173,8 @@ class TestChildFileField:
         parent_path = tmp_path / "parent.jsonl"
         child_path = tmp_path / "my_agent.jsonl"
 
-        with Tracer(parent_path) as parent:
-            child = parent.child("my_agent", child_path)
+        with Tracer(path=parent_path) as parent:
+            child = parent.child("my_agent", path=child_path)
             with child:
                 pass
 
@@ -182,8 +186,8 @@ class TestChildFileField:
         parent_path = tmp_path / "parent.jsonl"
         child_path = tmp_path / "my_agent.jsonl"
 
-        with Tracer(parent_path) as parent:
-            child = parent.child("my_agent", child_path)
+        with Tracer(path=parent_path) as parent:
+            child = parent.child("my_agent", path=child_path)
             with child:
                 pass
 
@@ -195,8 +199,8 @@ class TestChildFileField:
         parent_path = tmp_path / "parent.jsonl"
         child_path = tmp_path / "my_agent.jsonl"
 
-        with Tracer(parent_path) as parent:
-            child = parent.child("my_agent", child_path)
+        with Tracer(path=parent_path) as parent:
+            child = parent.child("my_agent", path=child_path)
             with child:
                 pass
 
@@ -208,17 +212,17 @@ class TestChildFileField:
     def test_child_file_with_default_path(self, tmp_path: Path):
         parent_path = tmp_path / "traces" / "parent.jsonl"
 
-        with Tracer(parent_path) as parent:
+        with Tracer(path=parent_path) as parent:
             child = parent.child("agent_x")
             with child:
                 pass
 
         parent_events = read_events(parent_path)
         started = [e for e in parent_events if e.get("name") == "child_started"][0]
-        assert started["data"]["child_file"] == "agent_x.jsonl"
+        assert started["data"]["child_file"].startswith("agent_x_")
 
         ended = [e for e in parent_events if e.get("name") == "child_ended"][0]
-        assert ended["data"]["child_file"] == "agent_x.jsonl"
+        assert ended["data"]["child_file"].startswith("agent_x_")
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +234,7 @@ class TestChildStatsRollup:
     def test_parent_stats_include_child_tokens(self, tmp_path: Path):
         parent_path = tmp_path / "parent.jsonl"
 
-        with Tracer(parent_path) as parent:
+        with Tracer(path=parent_path) as parent:
             # Parent's own span
             with parent.span(
                 "parent_call",
@@ -265,7 +269,7 @@ class TestChildStatsRollup:
     def test_parent_stats_include_child_errors(self, tmp_path: Path):
         parent_path = tmp_path / "parent.jsonl"
 
-        with Tracer(parent_path) as parent:
+        with Tracer(path=parent_path) as parent:
             child = parent.child("agent_a")
             with child:
                 try:
@@ -282,7 +286,7 @@ class TestChildStatsRollup:
     def test_multiple_children_roll_up(self, tmp_path: Path):
         parent_path = tmp_path / "parent.jsonl"
 
-        with Tracer(parent_path) as parent:
+        with Tracer(path=parent_path) as parent:
             for i in range(3):
                 child = parent.child(f"agent_{i}")
                 with (
@@ -313,7 +317,7 @@ class TestTraceEndError:
     def test_trace_end_ok_on_normal_exit(self, tmp_path: Path):
         path = tmp_path / "trace.jsonl"
 
-        with Tracer(path):
+        with Tracer(path=path):
             pass
 
         events = read_events(path)
@@ -324,7 +328,7 @@ class TestTraceEndError:
     def test_trace_end_error_on_exception(self, tmp_path: Path):
         path = tmp_path / "trace.jsonl"
 
-        with pytest.raises(ValueError, match="test error"), Tracer(path):
+        with pytest.raises(ValueError, match="test error"), Tracer(path=path):
             raise ValueError("test error")
 
         events = read_events(path)
@@ -336,7 +340,7 @@ class TestTraceEndError:
     def test_trace_end_error_includes_traceback(self, tmp_path: Path):
         path = tmp_path / "trace.jsonl"
 
-        with pytest.raises(RuntimeError), Tracer(path):
+        with pytest.raises(RuntimeError), Tracer(path=path):
             raise RuntimeError("crash")
 
         events = read_events(path)
@@ -547,7 +551,7 @@ class TestAggregateTokens:
         """Test reader against actual Tracer output."""
         path = tmp_path / "trace.jsonl"
 
-        with Tracer(path):
+        with Tracer(path=path):
             t = get_tracer()
             assert t is not None
             with t.span(

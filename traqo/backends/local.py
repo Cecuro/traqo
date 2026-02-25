@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import shutil
 import uuid
+from concurrent.futures import Future
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -36,13 +37,14 @@ class LocalBackend:
     def on_event(self, event: dict[str, Any]) -> None:
         pass
 
-    def on_trace_complete(self, trace_path: Path) -> None:
+    def on_trace_complete(self, trace_path: Path) -> Future | None:
         try:
             self._copy(trace_path)
         except Exception:
             logger.warning(
                 "traqo: LocalBackend failed to copy %s", trace_path, exc_info=True
             )
+        return None
 
     def close(self) -> None:
         pass

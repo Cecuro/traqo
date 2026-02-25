@@ -20,11 +20,11 @@ class TestConcurrency:
             return f"done_{name}"
 
         async def task_a():
-            async with Tracer(path_a, metadata={"task": "a"}):
+            async with Tracer(path=path_a, metadata={"task": "a"}):
                 await work("a")
 
         async def task_b():
-            async with Tracer(path_b, metadata={"task": "b"}):
+            async with Tracer(path=path_b, metadata={"task": "b"}):
                 await work("b")
 
         await asyncio.gather(task_a(), task_b())
@@ -43,7 +43,7 @@ class TestConcurrency:
         async def branch(name: str) -> str:
             return name
 
-        async with Tracer(trace_file):
+        async with Tracer(path=trace_file):
             await asyncio.gather(
                 branch("a"),
                 branch("b"),
@@ -58,7 +58,7 @@ class TestConcurrency:
 class TestEdgeCases:
     def test_tracer_outside_context_manager_still_writes(self, trace_file: Path):
         """Tracer used without 'with' still writes if opened manually."""
-        tracer = Tracer(trace_file)
+        tracer = Tracer(path=trace_file)
         tracer._open()
         tracer._start_time = __import__("datetime").datetime.now(
             __import__("datetime").timezone.utc
@@ -72,7 +72,7 @@ class TestEdgeCases:
 
     def test_write_failure_does_not_crash(self, trace_file: Path, caplog):
         """If writing fails, it logs a warning but doesn't crash."""
-        with Tracer(trace_file) as tracer:
+        with Tracer(path=trace_file) as tracer:
             # Close the file to force a write error
             tracer._file.close()
             with caplog.at_level(logging.WARNING):

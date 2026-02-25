@@ -55,10 +55,11 @@ class Backend(Protocol):
         """
         ...
 
-    def on_trace_complete(self, trace_path: Path) -> None:
+    def on_trace_complete(self, trace_path: Path) -> Future | None:
         """Called after the trace file is fully written and closed.
 
-        The file at *trace_path* is guaranteed to exist and be complete.
+        Returns a Future for async work (e.g. background upload), or None
+        if work completed synchronously.
         """
         ...
 

@@ -11,7 +11,7 @@ Shows core concepts:
 Run:
     uv run python examples/basic_tracing.py
 
-Then inspect examples/traces/basic.jsonl — each line is one event.
+Then inspect the generated file in examples/traces/ — each line is one event.
 """
 
 import json
@@ -22,10 +22,11 @@ from traqo import Tracer
 
 
 def main():
-    trace_path = os.path.join(os.path.dirname(__file__), "traces", "basic.jsonl")
+    trace_dir = os.path.join(os.path.dirname(__file__), "traces")
 
     with Tracer(
-        trace_path,
+        "basic",
+        trace_dir=trace_dir,
         input={"query": "What is Python?"},
         tags=["example", "basic"],
         thread_id="demo-001",
@@ -58,6 +59,7 @@ def main():
         tracer.set_output({"answer": "Python is a high-level programming language."})
 
     # Print results
+    trace_path = tracer._path
     print("Trace written to:", trace_path)
     print()
     with open(trace_path) as f:

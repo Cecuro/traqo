@@ -59,21 +59,21 @@ def ask_agent(agent, question: str, callbacks: list) -> str:
 
 def demo_callback():
     print("=== Pattern 1: TraqoCallback ===")
-    trace_path = os.path.join(
-        os.path.dirname(__file__), "traces", "agent_callback.jsonl"
-    )
+    trace_dir = os.path.join(os.path.dirname(__file__), "traces")
 
     llm = create_model()
     agent = create_react_agent(llm, [get_weather, get_population])
     callback = TraqoCallback()
 
-    with Tracer(trace_path, input={"city": "Tokyo"}, tags=["agent"]):
+    with Tracer(
+        "agent_callback", trace_dir=trace_dir, input={"city": "Tokyo"}, tags=["agent"]
+    ) as tracer:
         answer = ask_agent(
             agent, "What's the weather and population of Tokyo?", [callback]
         )
         print(f"Answer: {answer}")
 
-    print(f"Trace written to: {trace_path}\n")
+    print(f"Trace written to: {tracer._path}\n")
 
 
 # ── Pattern 2: traced_model() wraps models for pipelines ────────────────
@@ -81,9 +81,7 @@ def demo_callback():
 
 def demo_traced_model():
     print("=== Pattern 2: traced_model ===")
-    trace_path = os.path.join(
-        os.path.dirname(__file__), "traces", "agent_pipeline.jsonl"
-    )
+    trace_dir = os.path.join(os.path.dirname(__file__), "traces")
 
     base = create_model()
     classify_llm = traced_model(base, operation="classify")
@@ -91,7 +89,12 @@ def demo_traced_model():
 
     user_input = "The server crashed with an OOM error"
 
-    with Tracer(trace_path, input={"text": user_input}, tags=["pipeline"]) as tracer:
+    with Tracer(
+        "agent_pipeline",
+        trace_dir=trace_dir,
+        input={"text": user_input},
+        tags=["pipeline"],
+    ) as tracer:
         with tracer.span("analyze", input={"text": user_input}, kind="tool") as step:
             classification = classify_llm.invoke(
                 [HumanMessage(content=f"Classify (bug/feature/question): {user_input}")]
@@ -104,7 +107,7 @@ def demo_traced_model():
         tracer.set_output({"class": classification, "reason": explanation})
 
     print(f"Result: {classification} — {explanation}")
-    print(f"Trace written to: {trace_path}\n")
+    print(f"Trace written to: {tracer._path}\n")
 
 
 if __name__ == "__main__":

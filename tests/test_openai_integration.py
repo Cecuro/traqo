@@ -124,7 +124,7 @@ class TestCompletionsCreateTextResponse:
 
         traced = _TracedCompletions(mock_completions, "")
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             result = traced.create(
                 model="gpt-4",
                 messages=[{"role": "user", "content": "Hi"}],
@@ -170,7 +170,7 @@ class TestCompletionsCreateToolCalls:
 
         traced = _TracedCompletions(mock_completions, "")
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             traced.create(
                 model="gpt-4",
                 messages=[{"role": "user", "content": "What's the weather?"}],
@@ -195,7 +195,7 @@ class TestCompletionsCaptureContentFalse:
 
         traced = _TracedCompletions(mock_completions, "")
 
-        with Tracer(trace_file, capture_content=False):
+        with Tracer(path=trace_file, capture_content=False):
             traced.create(
                 model="gpt-4",
                 messages=[{"role": "user", "content": "secret input"}],
@@ -229,7 +229,7 @@ class TestCompletionsStreaming:
 
         traced = _TracedCompletions(mock_completions, "")
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             stream = traced.create(
                 model="gpt-4",
                 messages=[{"role": "user", "content": "Hi"}],
@@ -267,7 +267,7 @@ class TestCompletionsStreaming:
 
         traced = _TracedCompletions(mock_completions, "")
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             stream = traced.create(
                 model="gpt-4",
                 messages=[{"role": "user", "content": "Hi"}],
@@ -311,7 +311,7 @@ class TestStreamingToolCallDeltas:
 
         traced = _TracedCompletions(mock_completions, "")
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             stream = traced.create(
                 model="gpt-4",
                 messages=[{"role": "user", "content": "search for test"}],
@@ -356,7 +356,7 @@ class TestStreamingToolCallDeltas:
 
         traced = _TracedCompletions(mock_completions, "")
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             stream = traced.create(model="gpt-4", messages=[], stream=True)
             list(stream)
 
@@ -376,7 +376,7 @@ class TestStreamingErrors:
 
         traced = _TracedCompletions(mock_completions, "")
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             with pytest.raises(ConnectionError, match="API down"):
                 traced.create(
                     model="gpt-4",
@@ -428,7 +428,7 @@ class TestStreamContextManager:
 
         traced = _TracedCompletions(mock_completions, "")
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             stream = traced.create(
                 model="gpt-4",
                 messages=[{"role": "user", "content": "Hi"}],
@@ -465,7 +465,7 @@ class TestModelParamsInSpan:
 
         traced = _TracedCompletions(mock_completions, "")
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             traced.create(
                 model="gpt-4",
                 messages=[{"role": "user", "content": "Hi"}],
@@ -488,7 +488,7 @@ class TestTracedOpenAIEndToEnd:
 
         traced_client = traced_openai(mock_client)
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             result = traced_client.chat.completions.create(
                 model="gpt-4o",
                 messages=[{"role": "user", "content": "Hello"}],
@@ -514,7 +514,7 @@ class TestAsyncCompletions:
 
         traced = _TracedAsyncCompletions(mock_completions, "")
 
-        async with Tracer(trace_file):
+        async with Tracer(path=trace_file):
             result = await traced.create(
                 model="gpt-4",
                 messages=[{"role": "user", "content": "Hi"}],

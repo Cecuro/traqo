@@ -36,6 +36,7 @@ class RecordingBackend:
 
     def on_trace_complete(self, trace_path: Path) -> None:
         self.trace_complete_paths.append(trace_path)
+        return None
 
     def close(self) -> None:
         self.close_count += 1
@@ -75,7 +76,7 @@ class TestBackendProtocol:
 
     def test_tracer_validates_backends_on_construction(self, trace_file):
         with pytest.raises(TypeError, match="missing required callable method"):
-            Tracer(trace_file, backends=[{"not": "a backend"}])
+            Tracer(path=trace_file, backends=[{"not": "a backend"}])
 
     def test_tracer_validates_non_callable_attribute(self, trace_file):
         class BadBackend:
@@ -84,7 +85,7 @@ class TestBackendProtocol:
             close = 42
 
         with pytest.raises(TypeError, match="missing required callable method"):
-            Tracer(trace_file, backends=[BadBackend()])
+            Tracer(path=trace_file, backends=[BadBackend()])
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +96,7 @@ class TestBackendProtocol:
 class TestTracerBackendIntegration:
     def test_backend_receives_all_events(self, trace_file):
         backend = RecordingBackend()
-        with Tracer(trace_file, backends=[backend]) as tracer:
+        with Tracer(path=trace_file, backends=[backend]) as tracer:
             tracer.log("hello")
             with tracer.span("step"):
                 pass
@@ -112,7 +113,7 @@ class TestTracerBackendIntegration:
 
     def test_backend_receives_trace_complete(self, trace_file):
         backend = RecordingBackend()
-        with Tracer(trace_file, backends=[backend]):
+        with Tracer(path=trace_file, backends=[backend]):
             pass
         assert len(backend.trace_complete_paths) == 1
         assert backend.trace_complete_paths[0] == trace_file
@@ -120,14 +121,14 @@ class TestTracerBackendIntegration:
     def test_backend_close_not_called_from_exit(self, trace_file):
         """Backends are long-lived — close() is NOT called from __exit__."""
         backend = RecordingBackend()
-        with Tracer(trace_file, backends=[backend]):
+        with Tracer(path=trace_file, backends=[backend]):
             pass
         assert backend.close_count == 0
 
     def test_multiple_backends(self, trace_file):
         b1 = RecordingBackend()
         b2 = RecordingBackend()
-        with Tracer(trace_file, backends=[b1, b2]) as tracer:
+        with Tracer(path=trace_file, backends=[b1, b2]) as tracer:
             tracer.log("x")
         # trace_start + event + trace_end = 3
         assert len(b1.events) == 3
@@ -137,14 +138,14 @@ class TestTracerBackendIntegration:
 
     def test_no_backends_is_default(self, trace_file):
         """Omitting backends= produces normal behavior."""
-        with Tracer(trace_file) as tracer, tracer.span("step"):
+        with Tracer(path=trace_file) as tracer, tracer.span("step"):
             pass
         events = read_events(trace_file)
         assert events[0]["type"] == "trace_start"
         assert events[-1]["type"] == "trace_end"
 
     def test_empty_backends_list(self, trace_file):
-        with Tracer(trace_file, backends=[]) as tracer:
+        with Tracer(path=trace_file, backends=[]) as tracer:
             tracer.log("ok")
         events = read_events(trace_file)
         assert len(events) == 3
@@ -159,18 +160,19 @@ class TestChildBackendInheritance:
     def test_child_inherits_backends(self, tmp_path):
         backend = RecordingBackend()
         parent_path = tmp_path / "parent.jsonl"
-        with Tracer(parent_path, backends=[backend]) as parent:
+        with Tracer(path=parent_path, backends=[backend]) as parent:
             child = parent.child("agent_a")
             with child:
                 child.log("from_child")
-        # Child should trigger on_trace_complete for child file
-        child_path = tmp_path / "agent_a.jsonl"
-        assert child_path in backend.trace_complete_paths
+        # Child should trigger on_trace_complete for a child file
+        assert len(backend.trace_complete_paths) >= 1
+        child_paths = [p for p in backend.trace_complete_paths if "agent_a_" in p.name]
+        assert len(child_paths) == 1
 
     def test_child_events_reach_backend(self, tmp_path):
         backend = RecordingBackend()
         parent_path = tmp_path / "parent.jsonl"
-        with Tracer(parent_path, backends=[backend]) as parent:
+        with Tracer(path=parent_path, backends=[backend]) as parent:
             child = parent.child("agent_a")
             with child:
                 child.log("child_event")
@@ -191,7 +193,7 @@ class TestChildBackendInheritance:
 class TestBackendErrorResilience:
     def test_crashing_backend_doesnt_crash_tracer(self, trace_file):
         backend = CrashingBackend()
-        with Tracer(trace_file, backends=[backend]) as tracer:
+        with Tracer(path=trace_file, backends=[backend]) as tracer:
             tracer.log("still works")
         events = read_events(trace_file)
         assert len(events) == 3  # trace_start, event, trace_end
@@ -199,14 +201,14 @@ class TestBackendErrorResilience:
     def test_crashing_backend_logs_warning(self, trace_file, caplog):
         backend = CrashingBackend()
         with caplog.at_level(logging.WARNING):
-            with Tracer(trace_file, backends=[backend]):
+            with Tracer(path=trace_file, backends=[backend]):
                 pass
         assert "backend" in caplog.text.lower()
 
     def test_crash_doesnt_block_other_backends(self, trace_file):
         crashing = CrashingBackend()
         recording = RecordingBackend()
-        with Tracer(trace_file, backends=[crashing, recording]) as tracer:
+        with Tracer(path=trace_file, backends=[crashing, recording]) as tracer:
             tracer.log("ok")
         # recording should still get all events despite crashing going first
         assert len(recording.events) == 3
@@ -222,14 +224,14 @@ class TestDisabledTracerBackends:
     def test_disabled_tracer_no_backend_event_calls(self, trace_file):
         traqo.disable()
         backend = RecordingBackend()
-        with Tracer(trace_file, backends=[backend]):
+        with Tracer(path=trace_file, backends=[backend]):
             pass
         assert len(backend.events) == 0
 
     def test_disabled_tracer_no_trace_complete_calls(self, trace_file):
         traqo.disable()
         backend = RecordingBackend()
-        with Tracer(trace_file, backends=[backend]):
+        with Tracer(path=trace_file, backends=[backend]):
             pass
         assert len(backend.trace_complete_paths) == 0
 
@@ -245,7 +247,7 @@ class TestLocalBackend:
         target_dir = tmp_path / "collected"
         backend = LocalBackend(target_dir)
 
-        with Tracer(trace_file, backends=[backend]) as tracer:
+        with Tracer(path=trace_file, backends=[backend]) as tracer:
             tracer.log("hello")
 
         copied_files = list(target_dir.iterdir())
@@ -262,7 +264,7 @@ class TestLocalBackend:
         target_dir = tmp_path / "collected"
         backend = LocalBackend(target_dir, organize_by_date=True)
 
-        with Tracer(trace_file, backends=[backend]):
+        with Tracer(path=trace_file, backends=[backend]):
             pass
 
         # Should have a date subdirectory
@@ -281,9 +283,9 @@ class TestLocalBackend:
         backend = LocalBackend(target_dir)
 
         # Run twice with same source filename
-        with Tracer(trace_file, backends=[backend]):
+        with Tracer(path=trace_file, backends=[backend]):
             pass
-        with Tracer(trace_file, backends=[backend]):
+        with Tracer(path=trace_file, backends=[backend]):
             pass
 
         files = list(target_dir.iterdir())
@@ -296,7 +298,7 @@ class TestLocalBackend:
         trace_file = tmp_path / "run.jsonl"
         backend = LocalBackend(target_dir)
 
-        with Tracer(trace_file, backends=[backend]):
+        with Tracer(path=trace_file, backends=[backend]):
             pass
 
         assert target_dir.exists()
@@ -322,7 +324,7 @@ class TestS3Backend:
 
         backend = S3Backend("my-bucket", prefix="traces/", boto3_client=mock_client)
 
-        with Tracer(trace_file, backends=[backend]):
+        with Tracer(path=trace_file, backends=[backend]):
             pass
 
         flush_backends()
@@ -343,7 +345,7 @@ class TestS3Backend:
             boto3_client=mock_client,
         )
 
-        with Tracer(trace_file, backends=[backend]):
+        with Tracer(path=trace_file, backends=[backend]):
             pass
 
         flush_backends()
@@ -381,7 +383,7 @@ class TestGCSBackend:
 
         backend = GCSBackend("my-bucket", prefix="traces/", gcs_client=mock_client)
 
-        with Tracer(trace_file, backends=[backend]):
+        with Tracer(path=trace_file, backends=[backend]):
             pass
 
         flush_backends()
@@ -408,7 +410,7 @@ class TestGCSBackend:
             gcs_client=mock_client,
         )
 
-        with Tracer(trace_file, backends=[backend]):
+        with Tracer(path=trace_file, backends=[backend]):
             pass
 
         flush_backends()
@@ -432,12 +434,12 @@ class TestGCSBackend:
 class TestFlushAndShutdown:
     def test_flush_allows_new_work_after(self, trace_file):
         backend = RecordingBackend()
-        with Tracer(trace_file, backends=[backend]):
+        with Tracer(path=trace_file, backends=[backend]):
             pass
         flush_backends()
         # Should be able to start a new trace after flush
         trace_file2 = trace_file.parent / "run2.jsonl"
-        with Tracer(trace_file2, backends=[backend]):
+        with Tracer(path=trace_file2, backends=[backend]):
             pass
         assert len(backend.trace_complete_paths) == 2
 
@@ -445,7 +447,7 @@ class TestFlushAndShutdown:
         """After shutdown, a new executor is created lazily."""
         shutdown_backends()
         backend = RecordingBackend()
-        with Tracer(trace_file, backends=[backend]):
+        with Tracer(path=trace_file, backends=[backend]):
             pass
         # Events are delivered synchronously via on_event, so this works
         assert len(backend.events) == 2  # trace_start + trace_end

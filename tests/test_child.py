@@ -13,8 +13,8 @@ class TestChildTracer:
         parent_path = tmp_path / "parent.jsonl"
         child_path = tmp_path / "child.jsonl"
 
-        with Tracer(parent_path) as parent:
-            child = parent.child("agent_a", child_path)
+        with Tracer(path=parent_path) as parent:
+            child = parent.child("agent_a", path=child_path)
             with child:
                 child.log("from_child", {"x": 1})
 
@@ -28,8 +28,8 @@ class TestChildTracer:
         parent_path = tmp_path / "parent.jsonl"
         child_path = tmp_path / "child.jsonl"
 
-        with Tracer(parent_path) as parent:
-            child = parent.child("agent_a", child_path)
+        with Tracer(path=parent_path) as parent:
+            child = parent.child("agent_a", path=child_path)
             with child:
                 pass
 
@@ -41,8 +41,8 @@ class TestChildTracer:
         parent_path = tmp_path / "parent.jsonl"
         child_path = tmp_path / "child.jsonl"
 
-        with Tracer(parent_path) as parent:
-            child = parent.child("agent_a", child_path)
+        with Tracer(path=parent_path) as parent:
+            child = parent.child("agent_a", path=child_path)
             with child:
                 pass
 
@@ -55,8 +55,8 @@ class TestChildTracer:
         parent_path = tmp_path / "parent.jsonl"
         child_path = tmp_path / "child.jsonl"
 
-        with Tracer(parent_path) as parent:
-            child = parent.child("agent_a", child_path)
+        with Tracer(path=parent_path) as parent:
+            child = parent.child("agent_a", path=child_path)
             with child:
                 with child.span(
                     "call1",
@@ -85,21 +85,21 @@ class TestChildTracer:
     def test_child_default_path(self, tmp_path: Path):
         parent_path = tmp_path / "traces" / "parent.jsonl"
 
-        with Tracer(parent_path) as parent:
+        with Tracer(path=parent_path) as parent:
             child = parent.child("my_agent")
             with child:
                 child.log("hi")
 
-        expected_path = tmp_path / "traces" / "my_agent.jsonl"
-        assert expected_path.exists()
+        files = list((tmp_path / "traces").glob("my_agent_*.jsonl"))
+        assert len(files) == 1
 
     def test_child_context_switches(self, tmp_path: Path):
         parent_path = tmp_path / "parent.jsonl"
         child_path = tmp_path / "child.jsonl"
 
-        with Tracer(parent_path) as parent:
+        with Tracer(path=parent_path) as parent:
             assert get_tracer() is parent
-            child = parent.child("agent_a", child_path)
+            child = parent.child("agent_a", path=child_path)
             assert get_tracer() is parent
             with child:
                 assert get_tracer() is child
@@ -109,8 +109,8 @@ class TestChildTracer:
         parent_path = tmp_path / "parent.jsonl"
         child_path = tmp_path / "child.jsonl"
 
-        with Tracer(parent_path) as parent:
-            child = parent.child("agent_a", child_path)
+        with Tracer(path=parent_path) as parent:
+            child = parent.child("agent_a", path=child_path)
             with child, child.span("work", kind="llm"):
                 pass
 
@@ -125,7 +125,7 @@ class TestChildTracer:
         parent_path = tmp_path / "parent.jsonl"
         child_path = tmp_path / "child.jsonl"
 
-        with Tracer(parent_path, capture_content=False) as parent:
-            child = parent.child("agent_a", child_path)
+        with Tracer(path=parent_path, capture_content=False) as parent:
+            child = parent.child("agent_a", path=child_path)
             with child:
                 assert child._capture_content is False
