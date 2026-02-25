@@ -275,6 +275,7 @@ class Tracer:
             "type": "trace_end",
             "ts": _now(),
             "duration_s": round(duration, 3),
+            "status": "error" if exc_val is not None else "ok",
             "stats": {
                 "spans": self._stats_spans,
                 "events": self._stats_events,
@@ -283,6 +284,8 @@ class Tracer:
                 "errors": self._stats_errors,
             },
         }
+        if exc_val is not None:
+            end_event["error"] = serialize_error(exc_val)
         if self._output is not None:
             end_event["output"] = self._output
         if self._children:
@@ -420,14 +423,31 @@ class Tracer:
             end_event["metadata"] = span_obj.metadata.copy()
         self._write(end_event)
 
-    def child(self, name: str, path: Path | None = None) -> Tracer:
-        """Create a child tracer writing to a separate file."""
+    def child(
+        self,
+        name: str,
+        path: Path | None = None,
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> Tracer:
+        """Create a child tracer writing to a separate file.
+
+        Args:
+            name: Child tracer name (used in parent events and default filename).
+            path: JSONL file path. Defaults to ``parent_dir/{name}.jsonl``.
+            metadata: Extra metadata merged into the child's trace_start event.
+                      ``parent_trace`` is always included automatically.
+        """
         if path is None:
             path = self._path.parent / f"{name}.jsonl"
 
+        merged_metadata: dict[str, Any] = {"parent_trace": str(self._path)}
+        if metadata:
+            merged_metadata.update(metadata)
+
         child_tracer = Tracer(
             path,
-            metadata={"parent_trace": str(self._path)},
+            metadata=merged_metadata,
             capture_content=self._capture_content,
             backends=self._backends,
         )
@@ -443,7 +463,7 @@ class Tracer:
                 "parent_id": _get_parent_id(),
                 "name": "child_started",
                 "ts": _now(),
-                "data": {"child_name": name, "child_path": str(path)},
+                "data": {"child_name": name, "child_path": str(path), "child_file": path.name},
             }
         )
         with self._lock:
@@ -452,6 +472,7 @@ class Tracer:
     def _write_child_ended(self, name: str, child: Tracer) -> None:
         summary = {
             "name": name,
+            "file": child._path.name,
             "path": str(child._path),
             "duration_s": round(
                 (datetime.now(timezone.utc) - child._start_time).total_seconds(), 3
@@ -463,6 +484,13 @@ class Tracer:
             "total_output_tokens": child._stats_output_tokens,
         }
         self._children.append(summary)
+        # Roll up child stats so parent trace_end.stats reflects the full tree
+        with self._lock:
+            self._stats_spans += child._stats_spans
+            self._stats_input_tokens += child._stats_input_tokens
+            self._stats_output_tokens += child._stats_output_tokens
+            self._stats_errors += child._stats_errors
+            self._stats_events += 1
         self._write(
             {
                 "type": "event",
@@ -472,6 +500,7 @@ class Tracer:
                 "ts": _now(),
                 "data": {
                     "child_name": name,
+                    "child_file": child._path.name,
                     "duration_s": summary["duration_s"],
                     "spans": summary["spans"],
                     "total_input_tokens": summary["total_input_tokens"],
@@ -479,8 +508,6 @@ class Tracer:
                 },
             }
         )
-        with self._lock:
-            self._stats_events += 1
 
 
 
@@ -516,3 +543,46 @@ def update_current_span(
         span.update_metadata(kw_metadata)
     if tags:
         span.tags = (span.tags or []) + tags
+
+
+def subtrace(
+    name: str,
+    path: Path | None = None,
+    *,
+    metadata: dict[str, Any] | None = None,
+    backends: Sequence[Backend] | None = None,
+) -> Tracer:
+    """Create a child tracer if inside a trace context, otherwise a new root tracer.
+
+    This handles the common pattern where a sub-unit of work (e.g. an agent)
+    may run inside a parent trace or standalone::
+
+        with subtrace("my_agent", log_dir / "my_agent.jsonl"):
+            await agent.run(...)
+
+    When a parent tracer is active, ``path`` and ``backends`` are inherited from
+    the parent (and any explicit values are ignored). When no parent is active,
+    ``path`` is required.
+
+    Args:
+        name: Name for the child tracer / trace session.
+        path: JSONL file path. Required when no parent tracer is active.
+              Ignored when a parent exists (child derives path from parent).
+        metadata: Extra metadata for the trace_start event.
+        backends: Backends for uploading traces. Only used when no parent
+                  (children inherit parent backends).
+    """
+    import traqo
+
+    parent = get_tracer()
+    if parent is not None:
+        return parent.child(name, metadata=metadata)
+    if path is None:
+        if traqo._disabled:
+            # When disabled, path doesn't matter — Tracer won't write anything
+            path = Path(f"{name}.jsonl")
+        else:
+            raise ValueError(
+                f"subtrace({name!r}): path is required when no parent tracer is active"
+            )
+    return Tracer(path, metadata=metadata, backends=backends)

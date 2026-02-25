@@ -392,6 +392,67 @@ main { flex: 1; overflow: auto; position: relative; }
 .span-node .waterfall-bar[data-kind="llm"] { background: var(--blue); }
 .span-node .waterfall-bar[data-kind="tool"] { background: var(--purple); }
 
+/* ── Child Trace Nodes ─────────────────────────────────── */
+
+.child-trace-node {
+  display: flex; align-items: center;
+  padding: 6px 12px 6px 0;
+  cursor: pointer; transition: background 0.1s;
+  border-left: 3px solid var(--orange);
+  background: rgba(251, 146, 60, 0.04);
+}
+.child-trace-node:hover { background: rgba(251, 146, 60, 0.08); }
+.child-trace-node.selected { background: var(--bg-selected); border-left-color: var(--orange); }
+.child-trace-node.expanded { border-left-color: var(--orange); }
+
+.child-trace-node .span-info {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 8px;
+  padding-left: calc(12px + var(--depth, 0) * 20px);
+}
+
+.child-chevron {
+  font-size: 10px; color: var(--text-muted); flex-shrink: 0;
+  width: 14px; text-align: center;
+  transition: transform 0.15s;
+}
+
+.badge-child { background: rgba(251, 146, 60, 0.15); color: var(--orange); }
+
+.child-stats {
+  font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.child-open-link {
+  font-size: 11px; color: var(--text-dim); text-decoration: none;
+  font-family: var(--font-mono); white-space: nowrap;
+  padding: 2px 8px; border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+.child-open-link:hover { color: var(--accent); background: rgba(108, 140, 255, 0.1); }
+
+.child-trace-content {
+  border-left: 2px dashed rgba(251, 146, 60, 0.25);
+  margin-left: calc(12px + var(--depth, 0) * 20px + 7px);
+}
+
+.child-loading {
+  padding: 12px 16px; font-size: 12px; color: var(--text-muted);
+  display: flex; align-items: center; gap: 8px;
+}
+.child-loading::before {
+  content: ''; display: inline-block;
+  width: 14px; height: 14px;
+  border: 2px solid var(--border); border-top-color: var(--orange);
+  border-radius: 50%; animation: spin 0.7s linear infinite;
+}
+
+.child-error {
+  padding: 8px 16px; font-size: 12px; color: var(--red);
+  background: var(--red-dim); border-radius: 4px; margin: 4px 0;
+}
+
 /* ── Detail Panel ───────────────────────────────────────── */
 
 .detail-header {
