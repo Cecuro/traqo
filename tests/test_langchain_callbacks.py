@@ -22,8 +22,11 @@ from traqo.integrations.langchain import (
     TraqoCallback,
     TracedChatModel,
     _extract_output,
+    _is_langgraph_interrupt,
+    _interrupt_value,
     _message_content,
     _parse_usage_metadata,
+    track_langgraph,
 )
 from tests.conftest import read_events
 
@@ -652,3 +655,246 @@ class TestTokenParsing:
         result = ChatResult(generations=[gen])
         output = _extract_output(result)
         assert output == {"reasoning": "thinking...", "text": "Hello"}
+
+
+# ---------------------------------------------------------------------------
+# LangGraph interrupt handling
+# ---------------------------------------------------------------------------
+
+class GraphInterrupt(Exception):
+    """Fake LangGraph GraphInterrupt for testing."""
+    pass
+
+
+class NodeInterrupt(Exception):
+    """Fake LangGraph NodeInterrupt for testing."""
+    pass
+
+
+class TestInterruptDetection:
+    def test_detects_graph_interrupt(self):
+        assert _is_langgraph_interrupt(GraphInterrupt("paused"))
+
+    def test_detects_node_interrupt(self):
+        assert _is_langgraph_interrupt(NodeInterrupt("waiting"))
+
+    def test_ignores_regular_errors(self):
+        assert not _is_langgraph_interrupt(ValueError("oops"))
+        assert not _is_langgraph_interrupt(RuntimeError("fail"))
+
+    def test_interrupt_value_from_args(self):
+        err = GraphInterrupt("please approve")
+        assert _interrupt_value(err) == "please approve"
+
+    def test_interrupt_value_from_value_attr(self):
+        err = GraphInterrupt()
+        err.value = {"question": "Continue?"}
+        assert _interrupt_value(err) == {"question": "Continue?"}
+
+    def test_interrupt_value_none(self):
+        err = GraphInterrupt()
+        assert _interrupt_value(err) is None
+
+
+class TestChainErrorInterruptHandling:
+    def test_graph_interrupt_recorded_as_interrupted(self, trace_file: Path):
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(trace_file):
+            cb.on_chain_start(
+                serialized={"id": ["langgraph", "graph", "CompiledGraph"]},
+                inputs={"messages": [{"role": "user", "content": "hi"}]},
+                run_id=run_id,
+            )
+            cb.on_chain_error(
+                error=GraphInterrupt("human approval needed"),
+                run_id=run_id,
+            )
+
+        events = read_events(trace_file)
+        ends = [e for e in events if e["type"] == "span_end" and e.get("kind") == "chain"]
+        assert len(ends) == 1
+        assert ends[0]["status"] == "interrupted"
+        assert ends[0]["output"] == "human approval needed"
+        assert "error" not in ends[0]
+
+    def test_node_interrupt_recorded_as_interrupted(self, trace_file: Path):
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(trace_file):
+            cb.on_chain_start(
+                serialized={"id": ["langgraph", "graph", "CompiledGraph"]},
+                inputs={},
+                run_id=run_id,
+            )
+            err = NodeInterrupt()
+            err.value = {"question": "Approve this action?", "options": ["yes", "no"]}
+            cb.on_chain_error(error=err, run_id=run_id)
+
+        events = read_events(trace_file)
+        ends = [e for e in events if e["type"] == "span_end" and e.get("kind") == "chain"]
+        assert len(ends) == 1
+        assert ends[0]["status"] == "interrupted"
+        assert ends[0]["output"]["question"] == "Approve this action?"
+
+    def test_interrupt_no_error_count(self, trace_file: Path):
+        """Interrupts should not increment the error counter."""
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(trace_file) as t:
+            cb.on_chain_start(
+                serialized={"id": ["CompiledGraph"]},
+                inputs={},
+                run_id=run_id,
+            )
+            cb.on_chain_error(error=GraphInterrupt("pause"), run_id=run_id)
+            assert t._stats_errors == 0
+            assert t._stats_spans == 1
+
+    def test_interrupt_capture_content_false(self, trace_file: Path):
+        """Interrupt payload should be omitted when capture_content=False."""
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(trace_file, capture_content=False):
+            cb.on_chain_start(
+                serialized={"id": ["CompiledGraph"]},
+                inputs={},
+                run_id=run_id,
+            )
+            cb.on_chain_error(
+                error=GraphInterrupt("secret approval data"),
+                run_id=run_id,
+            )
+
+        events = read_events(trace_file)
+        ends = [e for e in events if e["type"] == "span_end" and e.get("kind") == "chain"]
+        assert ends[0]["status"] == "interrupted"
+        assert "output" not in ends[0]
+
+    def test_regular_error_still_works(self, trace_file: Path):
+        """Non-interrupt errors should still be recorded normally."""
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(trace_file) as t:
+            cb.on_chain_start(
+                serialized={"id": ["LLMChain"]},
+                inputs={},
+                run_id=run_id,
+            )
+            cb.on_chain_error(error=ValueError("real error"), run_id=run_id)
+            assert t._stats_errors == 1
+
+        events = read_events(trace_file)
+        ends = [e for e in events if e["type"] == "span_end" and e.get("kind") == "chain"]
+        assert ends[0]["status"] == "error"
+        assert ends[0]["error"]["type"] == "ValueError"
+
+
+# ---------------------------------------------------------------------------
+# track_langgraph() helper
+# ---------------------------------------------------------------------------
+
+class _FakeGraph:
+    """Minimal mock of a compiled LangGraph for testing track_langgraph."""
+
+    def __init__(self):
+        self.last_config = None
+
+    def invoke(self, input: Any, config: dict | None = None, **kwargs: Any) -> dict:
+        self.last_config = config
+        return {"result": "ok"}
+
+    async def ainvoke(self, input: Any, config: dict | None = None, **kwargs: Any) -> dict:
+        self.last_config = config
+        return {"result": "ok"}
+
+    def stream(self, input: Any, config: dict | None = None, **kwargs: Any):
+        self.last_config = config
+        yield {"chunk": 1}
+        yield {"chunk": 2}
+
+    async def astream(self, input: Any, config: dict | None = None, **kwargs: Any):
+        self.last_config = config
+        yield {"chunk": 1}
+        yield {"chunk": 2}
+
+
+class TestTrackLanggraph:
+    def test_injects_callback_on_invoke(self):
+        graph = _FakeGraph()
+        cb = TraqoCallback()
+        track_langgraph(graph, callback=cb)
+
+        result = graph.invoke({"messages": []})
+        assert result == {"result": "ok"}
+        assert cb in graph.last_config["callbacks"]
+
+    def test_creates_callback_if_none(self):
+        graph = _FakeGraph()
+        track_langgraph(graph)
+
+        graph.invoke({"messages": []})
+        cbs = graph.last_config["callbacks"]
+        assert len(cbs) == 1
+        assert isinstance(cbs[0], TraqoCallback)
+
+    def test_preserves_existing_callbacks(self):
+        graph = _FakeGraph()
+        cb = TraqoCallback()
+        existing_cb = MagicMock()
+
+        track_langgraph(graph, callback=cb)
+
+        graph.invoke({}, config={"callbacks": [existing_cb]})
+        cbs = graph.last_config["callbacks"]
+        assert existing_cb in cbs
+        assert cb in cbs
+
+    def test_no_duplicate_callback(self):
+        graph = _FakeGraph()
+        cb = TraqoCallback()
+        track_langgraph(graph, callback=cb)
+
+        # Pass the same callback in config — should not duplicate
+        graph.invoke({}, config={"callbacks": [cb]})
+        cbs = graph.last_config["callbacks"]
+        assert cbs.count(cb) == 1
+
+    def test_stream_injects_callback(self):
+        graph = _FakeGraph()
+        cb = TraqoCallback()
+        track_langgraph(graph, callback=cb)
+
+        chunks = list(graph.stream({"messages": []}))
+        assert chunks == [{"chunk": 1}, {"chunk": 2}]
+        assert cb in graph.last_config["callbacks"]
+
+    @pytest.mark.asyncio
+    async def test_ainvoke_injects_callback(self):
+        graph = _FakeGraph()
+        cb = TraqoCallback()
+        track_langgraph(graph, callback=cb)
+
+        result = await graph.ainvoke({"messages": []})
+        assert result == {"result": "ok"}
+        assert cb in graph.last_config["callbacks"]
+
+    @pytest.mark.asyncio
+    async def test_astream_injects_callback(self):
+        graph = _FakeGraph()
+        cb = TraqoCallback()
+        track_langgraph(graph, callback=cb)
+
+        chunks = [c async for c in graph.astream({"messages": []})]
+        assert chunks == [{"chunk": 1}, {"chunk": 2}]
+        assert cb in graph.last_config["callbacks"]
+
+    def test_returns_graph_for_chaining(self):
+        graph = _FakeGraph()
+        result = track_langgraph(graph)
+        assert result is graph

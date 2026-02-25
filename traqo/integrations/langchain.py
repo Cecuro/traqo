@@ -131,6 +131,28 @@ def _messages_to_dicts(messages: list[BaseMessage]) -> list[dict[str, Any]]:
     return [_message_to_dict(msg) for msg in messages]
 
 
+def _is_langgraph_interrupt(error: BaseException) -> bool:
+    """Check if an error is a LangGraph interrupt (control flow, not an error).
+
+    LangGraph uses ``GraphInterrupt`` and ``NodeInterrupt`` for human-in-the-loop,
+    approval gates, and other control-flow pauses.  We detect by class name so
+    that ``langgraph`` remains an optional dependency.
+    """
+    return type(error).__name__ in ("GraphInterrupt", "NodeInterrupt")
+
+
+def _interrupt_value(error: BaseException) -> Any:
+    """Extract the interrupt payload from a LangGraph interrupt exception."""
+    # GraphInterrupt stores the payload in .args[0] (a list of Interrupt objects)
+    # or sometimes directly as .value
+    value = getattr(error, "value", None)
+    if value is not None:
+        return value
+    if error.args:
+        return error.args[0]
+    return None
+
+
 def _extract_model_name(model: BaseChatModel) -> str:
     for attr in ("model_name", "model", "deployment_name", "azure_deployment"):
         val = getattr(model, attr, None)
@@ -614,6 +636,26 @@ class TraqoCallback(BaseCallbackHandler):
         if not info:
             return
         duration = (datetime.now(timezone.utc) - info["start"]).total_seconds()
+
+        # LangGraph interrupts are control flow, not errors
+        if _is_langgraph_interrupt(error):
+            end_event: dict[str, Any] = {
+                "type": "span_end",
+                "id": info["span_id"],
+                "parent_id": info["parent_id"],
+                "name": info["name"],
+                "ts": _now(),
+                "duration_s": round(duration, 3),
+                "status": "interrupted",
+                "kind": "chain",
+            }
+            payload = _interrupt_value(error)
+            if tracer.capture_content and payload is not None:
+                end_event["output"] = payload
+            tracer.write_event(end_event)
+            tracer.record_span()
+            return
+
         tracer.write_event({
             "type": "span_end",
             "id": info["span_id"],
@@ -833,3 +875,65 @@ class TracedChatModel(BaseChatModel):
 def traced_model(model: BaseChatModel, operation: str = "") -> TracedChatModel:
     """Wrap a LangChain chat model to auto-trace LLM calls as spans."""
     return TracedChatModel(wrapped=model, operation=operation)
+
+
+def track_langgraph(graph: Any, callback: TraqoCallback | None = None) -> Any:
+    """Auto-inject a TraqoCallback into a compiled LangGraph.
+
+    After calling this, all ``invoke`` / ``ainvoke`` / ``stream`` /
+    ``astream`` calls on *graph* will automatically include the callback
+    — no need to pass ``config={"callbacks": [cb]}`` every time.
+
+    Args:
+        graph: A compiled LangGraph (``CompiledGraph`` or
+            ``CompiledStateGraph``).
+        callback: An existing :class:`TraqoCallback` to reuse.  If *None*,
+            a new one is created.
+
+    Returns:
+        The same *graph* object (mutated in-place) for chaining.
+
+    Example::
+
+        from langgraph.prebuilt import create_react_agent
+        agent = create_react_agent(llm, tools)
+        track_langgraph(agent)
+
+        with Tracer("trace.jsonl"):
+            result = agent.invoke({"messages": [HumanMessage("hi")]})
+    """
+    if callback is None:
+        callback = TraqoCallback()
+
+    _orig_invoke = graph.invoke
+    _orig_ainvoke = graph.ainvoke
+    _orig_stream = graph.stream
+    _orig_astream = graph.astream
+
+    def _inject_callback(config: dict[str, Any] | None) -> dict[str, Any]:
+        config = dict(config) if config else {}
+        cbs = list(config.get("callbacks") or [])
+        if callback not in cbs:
+            cbs.append(callback)
+        config["callbacks"] = cbs
+        return config
+
+    def invoke(input: Any, config: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        return _orig_invoke(input, config=_inject_callback(config), **kwargs)
+
+    async def ainvoke(input: Any, config: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        return await _orig_ainvoke(input, config=_inject_callback(config), **kwargs)
+
+    def stream(input: Any, config: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        yield from _orig_stream(input, config=_inject_callback(config), **kwargs)
+
+    async def astream(input: Any, config: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        async for chunk in _orig_astream(input, config=_inject_callback(config), **kwargs):
+            yield chunk
+
+    graph.invoke = invoke
+    graph.ainvoke = ainvoke
+    graph.stream = stream
+    graph.astream = astream
+
+    return graph
