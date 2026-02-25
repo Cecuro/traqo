@@ -18,7 +18,8 @@ _MAX_TRACEBACK_LENGTH = 2000
 
 def _is_numpy(value: Any) -> bool:
     """Check if a value is a numpy type without importing numpy."""
-    return type(value).__module__.startswith("numpy")
+    module = getattr(type(value), "__module__", None)
+    return module is not None and module.startswith("numpy")
 
 
 def _serialize_numpy(value: Any, *, _seen: set[int] | None = None) -> Any:
@@ -87,7 +88,8 @@ def _serialize_value(value: Any, *, _seen: set[int] | None = None) -> Any:
 
             # 6. Dataclass
             if dataclasses.is_dataclass(value) and not isinstance(value, type):
-                return _serialize_value(value.__dict__, _seen=_seen)
+                d = {f.name: getattr(value, f.name) for f in dataclasses.fields(value)}
+                return _serialize_value(d, _seen=_seen)
 
             # 7. numpy (optional, no hard dependency)
             if _is_numpy(value):

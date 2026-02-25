@@ -288,11 +288,13 @@ class Tracer:
         if self._children:
             end_event["children"] = self._children
         self._write(end_event)
-        self._close()
-        self._notify_backends_complete()
-        if self._token is not None:
-            _active_tracer.reset(self._token)
-            self._token = None
+        try:
+            self._close()
+            self._notify_backends_complete()
+        finally:
+            if self._token is not None:
+                _active_tracer.reset(self._token)
+                self._token = None
         return False
 
     async def __aenter__(self) -> Tracer:
