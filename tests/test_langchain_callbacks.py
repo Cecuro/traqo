@@ -1179,3 +1179,498 @@ class TestTrackLanggraph:
         graph = _FakeGraph()
         result = track_langgraph(graph)
         assert result is graph
+
+
+# ---------------------------------------------------------------------------
+# Tags and metadata capture from kwargs
+# ---------------------------------------------------------------------------
+
+
+class TestTagsAndMetadata:
+    def test_chain_start_captures_tags_and_metadata(self, trace_file: Path):
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(path=trace_file):
+            cb.on_chain_start(
+                serialized={"id": ["langchain", "chains", "LLMChain"]},
+                inputs={"text": "hello"},
+                run_id=run_id,
+                tags=["tag1", "tag2"],
+                metadata={"user_id": "u123", "session": "s456"},
+            )
+            cb.on_chain_end(outputs={}, run_id=run_id)
+
+        events = read_events(trace_file)
+        start = [
+            e for e in events if e["type"] == "span_start" and e.get("kind") == "chain"
+        ][0]
+        assert start["tags"] == ["tag1", "tag2"]
+        assert start["metadata"]["user_id"] == "u123"
+        assert start["metadata"]["session"] == "s456"
+
+    def test_chat_model_start_captures_tags_and_metadata(self, trace_file: Path):
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(path=trace_file):
+            cb.on_chat_model_start(
+                serialized={"kwargs": {"model_name": "gpt-4"}, "id": ["ChatOpenAI"]},
+                messages=[[HumanMessage(content="Hi")]],
+                run_id=run_id,
+                tags=["production"],
+                metadata={"env": "prod"},
+            )
+            cb.on_llm_end(
+                response=LLMResult(
+                    generations=[[ChatGeneration(message=AIMessage(content="Hi"))]]
+                ),
+                run_id=run_id,
+            )
+
+        events = read_events(trace_file)
+        start = [
+            e for e in events if e["type"] == "span_start" and e.get("kind") == "llm"
+        ][0]
+        assert start["tags"] == ["production"]
+        assert start["metadata"]["env"] == "prod"
+        assert start["metadata"]["provider"] == "langchain"
+
+    def test_tool_start_captures_tags_and_metadata(self, trace_file: Path):
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(path=trace_file):
+            cb.on_tool_start(
+                serialized={"name": "calculator"},
+                input_str="2+2",
+                run_id=run_id,
+                tags=["math"],
+                metadata={"priority": "high"},
+            )
+            cb.on_tool_end(output="4", run_id=run_id)
+
+        events = read_events(trace_file)
+        start = [
+            e for e in events if e["type"] == "span_start" and e.get("kind") == "tool"
+        ][0]
+        assert start["tags"] == ["math"]
+        assert start["metadata"]["priority"] == "high"
+
+    def test_retriever_start_captures_tags_and_metadata(self, trace_file: Path):
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(path=trace_file):
+            cb.on_retriever_start(
+                serialized={"id": ["langchain", "retrievers", "FAISS"]},
+                query="test",
+                run_id=run_id,
+                tags=["retrieval"],
+                metadata={"index": "main"},
+            )
+            cb.on_retriever_end(documents=[], run_id=run_id)
+
+        events = read_events(trace_file)
+        start = [
+            e
+            for e in events
+            if e["type"] == "span_start" and e.get("kind") == "retriever"
+        ][0]
+        assert start["tags"] == ["retrieval"]
+        assert start["metadata"]["index"] == "main"
+
+    def test_llm_start_captures_tags_and_metadata(self, trace_file: Path):
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(path=trace_file):
+            cb.on_llm_start(
+                serialized={
+                    "kwargs": {"model_name": "text-davinci"},
+                    "id": ["OpenAI"],
+                },
+                prompts=["Hello"],
+                run_id=run_id,
+                tags=["legacy"],
+                metadata={"team": "ml"},
+            )
+            cb.on_llm_end(
+                response=LLMResult(
+                    generations=[[ChatGeneration(message=AIMessage(content="Hi"))]]
+                ),
+                run_id=run_id,
+            )
+
+        events = read_events(trace_file)
+        start = [
+            e for e in events if e["type"] == "span_start" and e.get("kind") == "llm"
+        ][0]
+        assert start["tags"] == ["legacy"]
+        assert start["metadata"]["team"] == "ml"
+
+    def test_no_tags_or_metadata_when_absent(self, trace_file: Path):
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(path=trace_file):
+            cb.on_chain_start(
+                serialized={"id": ["LLMChain"]},
+                inputs={},
+                run_id=run_id,
+            )
+            cb.on_chain_end(outputs={}, run_id=run_id)
+
+        events = read_events(trace_file)
+        start = [
+            e for e in events if e["type"] == "span_start" and e.get("kind") == "chain"
+        ][0]
+        assert "tags" not in start
+        # chain/tool/retriever don't emit metadata when empty
+        assert "metadata" not in start
+
+
+# ---------------------------------------------------------------------------
+# Invocation params (model parameters)
+# ---------------------------------------------------------------------------
+
+
+class TestInvocationParams:
+    def test_model_params_captured_from_invocation_params(self, trace_file: Path):
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(path=trace_file):
+            cb.on_chat_model_start(
+                serialized={"kwargs": {"model_name": "gpt-4"}, "id": ["ChatOpenAI"]},
+                messages=[[HumanMessage(content="Hi")]],
+                run_id=run_id,
+                invocation_params={
+                    "model": "gpt-4",
+                    "temperature": 0.7,
+                    "max_tokens": 100,
+                    "top_p": 0.9,
+                    "frequency_penalty": 0.5,
+                    "presence_penalty": 0.3,
+                    "stop": ["\n"],
+                },
+            )
+            cb.on_llm_end(
+                response=LLMResult(
+                    generations=[[ChatGeneration(message=AIMessage(content="Hi"))]]
+                ),
+                run_id=run_id,
+            )
+
+        events = read_events(trace_file)
+        start = [
+            e for e in events if e["type"] == "span_start" and e.get("kind") == "llm"
+        ][0]
+        params = start["metadata"]["model_params"]
+        assert params["temperature"] == 0.7
+        assert params["max_tokens"] == 100
+        assert params["top_p"] == 0.9
+        assert params["frequency_penalty"] == 0.5
+        assert params["presence_penalty"] == 0.3
+        assert params["stop"] == ["\n"]
+
+    def test_none_values_excluded_from_model_params(self, trace_file: Path):
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(path=trace_file):
+            cb.on_chat_model_start(
+                serialized={"kwargs": {"model_name": "gpt-4"}, "id": ["ChatOpenAI"]},
+                messages=[[HumanMessage(content="Hi")]],
+                run_id=run_id,
+                invocation_params={"temperature": 0.7, "max_tokens": None},
+            )
+            cb.on_llm_end(
+                response=LLMResult(
+                    generations=[[ChatGeneration(message=AIMessage(content="Hi"))]]
+                ),
+                run_id=run_id,
+            )
+
+        events = read_events(trace_file)
+        start = [
+            e for e in events if e["type"] == "span_start" and e.get("kind") == "llm"
+        ][0]
+        params = start["metadata"]["model_params"]
+        assert "max_tokens" not in params
+        assert params["temperature"] == 0.7
+
+    def test_model_name_fallback_to_invocation_params(self, trace_file: Path):
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(path=trace_file):
+            cb.on_chat_model_start(
+                serialized={"id": [], "kwargs": {}},
+                messages=[[HumanMessage(content="Hi")]],
+                run_id=run_id,
+                invocation_params={"model_name": "claude-3-opus"},
+            )
+            cb.on_llm_end(
+                response=LLMResult(
+                    generations=[[ChatGeneration(message=AIMessage(content="Hi"))]]
+                ),
+                run_id=run_id,
+            )
+
+        events = read_events(trace_file)
+        start = [
+            e for e in events if e["type"] == "span_start" and e.get("kind") == "llm"
+        ][0]
+        assert start["name"] == "claude-3-opus"
+        assert start["metadata"]["model"] == "claude-3-opus"
+
+
+# ---------------------------------------------------------------------------
+# Token extraction fallback (llm_output["usage"])
+# ---------------------------------------------------------------------------
+
+
+class TestTokenExtractionFallback:
+    def test_usage_key_fallback_in_llm_result(self, trace_file: Path):
+        """langchain-anthropic uses llm_output['usage'] not 'token_usage'."""
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        llm_result = LLMResult(
+            generations=[[ChatGeneration(message=AIMessage(content="response"))]],
+            llm_output={
+                "usage": {"prompt_tokens": 15, "completion_tokens": 25},
+            },
+        )
+
+        with Tracer(path=trace_file):
+            cb.on_chat_model_start(
+                serialized={"kwargs": {"model": "claude-3"}, "id": ["ChatAnthropic"]},
+                messages=[[HumanMessage(content="Hi")]],
+                run_id=run_id,
+            )
+            cb.on_llm_end(response=llm_result, run_id=run_id)
+
+        events = read_events(trace_file)
+        end = [e for e in events if e["type"] == "span_end" and e.get("kind") == "llm"][
+            0
+        ]
+        assert end["metadata"]["token_usage"]["input_tokens"] == 15
+        assert end["metadata"]["token_usage"]["output_tokens"] == 25
+
+    def test_token_usage_key_still_works(self, trace_file: Path):
+        """Original token_usage path still works (OpenAI)."""
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        llm_result = LLMResult(
+            generations=[[ChatGeneration(message=AIMessage(content="response"))]],
+            llm_output={
+                "token_usage": {"prompt_tokens": 10, "completion_tokens": 20},
+            },
+        )
+
+        with Tracer(path=trace_file):
+            cb.on_chat_model_start(
+                serialized={"kwargs": {"model": "gpt-4"}, "id": ["ChatOpenAI"]},
+                messages=[[HumanMessage(content="Hi")]],
+                run_id=run_id,
+            )
+            cb.on_llm_end(response=llm_result, run_id=run_id)
+
+        events = read_events(trace_file)
+        end = [e for e in events if e["type"] == "span_end" and e.get("kind") == "llm"][
+            0
+        ]
+        assert end["metadata"]["token_usage"]["input_tokens"] == 10
+        assert end["metadata"]["token_usage"]["output_tokens"] == 20
+
+
+# ---------------------------------------------------------------------------
+# Model name from LLMResult response
+# ---------------------------------------------------------------------------
+
+
+class TestResponseModelName:
+    def test_model_name_updated_from_response(self, trace_file: Path):
+        """Azure OpenAI returns actual model in response.llm_output['model_name']."""
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        llm_result = LLMResult(
+            generations=[[ChatGeneration(message=AIMessage(content="Hi"))]],
+            llm_output={"model_name": "gpt-4-0613"},
+        )
+
+        with Tracer(path=trace_file):
+            cb.on_chat_model_start(
+                serialized={
+                    "kwargs": {"deployment_name": "my-gpt4-deployment"},
+                    "id": ["AzureChatOpenAI"],
+                },
+                messages=[[HumanMessage(content="Hi")]],
+                run_id=run_id,
+            )
+            cb.on_llm_end(response=llm_result, run_id=run_id)
+
+        events = read_events(trace_file)
+        end = [e for e in events if e["type"] == "span_end" and e.get("kind") == "llm"][
+            0
+        ]
+        assert end["metadata"]["model"] == "gpt-4-0613"
+
+    def test_model_name_not_overwritten_when_absent(self, trace_file: Path):
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        llm_result = LLMResult(
+            generations=[[ChatGeneration(message=AIMessage(content="Hi"))]],
+            llm_output={},
+        )
+
+        with Tracer(path=trace_file):
+            cb.on_chat_model_start(
+                serialized={"kwargs": {"model_name": "gpt-4"}, "id": ["ChatOpenAI"]},
+                messages=[[HumanMessage(content="Hi")]],
+                run_id=run_id,
+            )
+            cb.on_llm_end(response=llm_result, run_id=run_id)
+
+        events = read_events(trace_file)
+        end = [e for e in events if e["type"] == "span_end" and e.get("kind") == "llm"][
+            0
+        ]
+        assert end["metadata"]["model"] == "gpt-4"
+
+
+# ---------------------------------------------------------------------------
+# GraphBubbleUp MRO detection
+# ---------------------------------------------------------------------------
+
+
+class GraphBubbleUp(Exception):
+    """Fake LangGraph GraphBubbleUp base class."""
+
+    pass
+
+
+class ParentCommand(GraphBubbleUp):
+    """Fake LangGraph ParentCommand (subclass of GraphBubbleUp)."""
+
+    pass
+
+
+class TestGraphBubbleUpDetection:
+    def test_detects_graph_bubble_up(self):
+        assert _is_langgraph_interrupt(GraphBubbleUp("routing"))
+
+    def test_detects_parent_command_via_mro(self):
+        assert _is_langgraph_interrupt(ParentCommand("delegate"))
+
+    def test_graph_interrupt_still_detected(self):
+        assert _is_langgraph_interrupt(GraphInterrupt("paused"))
+
+    def test_node_interrupt_still_detected(self):
+        assert _is_langgraph_interrupt(NodeInterrupt("waiting"))
+
+    def test_regular_errors_not_detected(self):
+        assert not _is_langgraph_interrupt(ValueError("oops"))
+        assert not _is_langgraph_interrupt(RuntimeError("fail"))
+
+    def test_parent_command_recorded_as_interrupted(self, trace_file: Path):
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(path=trace_file):
+            cb.on_chain_start(
+                serialized={"id": ["langgraph", "graph", "CompiledGraph"]},
+                inputs={},
+                run_id=run_id,
+            )
+            cb.on_chain_error(
+                error=ParentCommand("route to agent B"),
+                run_id=run_id,
+            )
+
+        events = read_events(trace_file)
+        ends = [
+            e for e in events if e["type"] == "span_end" and e.get("kind") == "chain"
+        ]
+        assert len(ends) == 1
+        assert ends[0]["status"] == "interrupted"
+
+
+# ---------------------------------------------------------------------------
+# Time-to-first-token (TTFT)
+# ---------------------------------------------------------------------------
+
+
+class TestTTFT:
+    def test_ttft_recorded_on_first_token(self, trace_file: Path):
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(path=trace_file):
+            cb.on_chat_model_start(
+                serialized={"kwargs": {"model_name": "gpt-4"}, "id": ["ChatOpenAI"]},
+                messages=[[HumanMessage(content="Hi")]],
+                run_id=run_id,
+            )
+            # Simulate streaming tokens
+            cb.on_llm_new_token("Hello", run_id=run_id)
+            cb.on_llm_new_token(" world", run_id=run_id)
+
+            cb.on_llm_end(
+                response=LLMResult(
+                    generations=[
+                        [ChatGeneration(message=AIMessage(content="Hello world"))]
+                    ]
+                ),
+                run_id=run_id,
+            )
+
+        events = read_events(trace_file)
+        end = [e for e in events if e["type"] == "span_end" and e.get("kind") == "llm"][
+            0
+        ]
+        assert "ttft_s" in end["metadata"]
+        assert isinstance(end["metadata"]["ttft_s"], float)
+        assert end["metadata"]["ttft_s"] >= 0
+
+    def test_ttft_only_recorded_once(self, trace_file: Path):
+        """Only the first token should set ttft_s."""
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(path=trace_file):
+            cb.on_chat_model_start(
+                serialized={"kwargs": {"model_name": "gpt-4"}, "id": ["ChatOpenAI"]},
+                messages=[[HumanMessage(content="Hi")]],
+                run_id=run_id,
+            )
+            cb.on_llm_new_token("First", run_id=run_id)
+
+            # Read the ttft after first token
+            with cb._lock:
+                first_ttft = cb._runs[run_id]["metadata"]["ttft_s"]
+
+            # Second token should not change ttft
+            cb.on_llm_new_token("Second", run_id=run_id)
+            with cb._lock:
+                second_ttft = cb._runs[run_id]["metadata"]["ttft_s"]
+
+            assert first_ttft == second_ttft
+
+            cb.on_llm_end(
+                response=LLMResult(
+                    generations=[[ChatGeneration(message=AIMessage(content="done"))]]
+                ),
+                run_id=run_id,
+            )
+
+    def test_ttft_no_crash_for_unknown_run(self, trace_file: Path):
+        """on_llm_new_token should not crash if run_id is unknown."""
+        cb = TraqoCallback()
+        # Should not raise
+        cb.on_llm_new_token("token", run_id=uuid4())

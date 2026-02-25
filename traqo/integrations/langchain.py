@@ -68,7 +68,7 @@ def _parse_usage_metadata(meta: Any) -> dict[str, int]:
 def _extract_token_usage(result: ChatResult) -> dict[str, int]:
     usage: dict[str, int] = {}
     llm_output = result.llm_output or {}
-    token_usage = llm_output.get("token_usage", {})
+    token_usage = llm_output.get("token_usage") or llm_output.get("usage") or {}
     if token_usage:
         usage["input_tokens"] = token_usage.get("prompt_tokens", 0)
         usage["output_tokens"] = token_usage.get("completion_tokens", 0)
@@ -140,11 +140,15 @@ def _messages_to_dicts(messages: list[BaseMessage]) -> list[dict[str, Any]]:
 def _is_langgraph_interrupt(error: BaseException) -> bool:
     """Check if an error is a LangGraph interrupt (control flow, not an error).
 
-    LangGraph uses ``GraphInterrupt`` and ``NodeInterrupt`` for human-in-the-loop,
-    approval gates, and other control-flow pauses.  We detect by class name so
-    that ``langgraph`` remains an optional dependency.
+    LangGraph uses ``GraphBubbleUp`` as the base class for all control-flow
+    exceptions (``GraphInterrupt``, ``NodeInterrupt``, ``ParentCommand``, etc.).
+    We check the MRO by class name so that ``langgraph`` remains an optional
+    dependency and any current or future subclass is caught.
     """
-    return type(error).__name__ in ("GraphInterrupt", "NodeInterrupt")
+    return any(
+        cls.__name__ in ("GraphBubbleUp", "GraphInterrupt", "NodeInterrupt")
+        for cls in type(error).__mro__
+    )
 
 
 def _interrupt_value(error: BaseException) -> Any:
@@ -233,15 +237,24 @@ class TraqoCallback(BaseCallbackHandler):
     ) -> str:
         if "name" in kwargs:
             return kwargs["name"]
-        if serialized is None:
-            return "unknown"
-        ser_kwargs = serialized.get("kwargs", {})
-        for key in ("model_name", "model", "deployment_name", "azure_deployment"):
-            val = ser_kwargs.get(key)
-            if val:
-                return val
-        id_parts = serialized.get("id", [])
-        return id_parts[-1] if id_parts else "unknown"
+        if serialized is not None:
+            ser_kwargs = serialized.get("kwargs", {})
+            for key in ("model_name", "model", "deployment_name", "azure_deployment"):
+                val = ser_kwargs.get(key)
+                if val:
+                    return val
+        # Fallback: check invocation_params (some providers put model name there)
+        invocation_params = kwargs.get("invocation_params", {})
+        if invocation_params:
+            for key in ("model_name", "model"):
+                val = invocation_params.get(key)
+                if val:
+                    return val
+        if serialized is not None:
+            id_parts = serialized.get("id", [])
+            if id_parts:
+                return id_parts[-1]
+        return "unknown"
 
     # -- LLM callbacks --
 
@@ -266,6 +279,30 @@ class TraqoCallback(BaseCallbackHandler):
         model = self._extract_model_from_serialized(serialized, **kwargs)
 
         meta: dict[str, Any] = {"provider": "langchain", "model": model}
+
+        # Extract model parameters from invocation_params
+        invocation_params = kwargs.get("invocation_params", {})
+        if invocation_params:
+            model_params: dict[str, Any] = {}
+            for key in (
+                "temperature",
+                "max_tokens",
+                "max_completion_tokens",
+                "top_p",
+                "frequency_penalty",
+                "presence_penalty",
+                "stop",
+            ):
+                if key in invocation_params and invocation_params[key] is not None:
+                    model_params[key] = invocation_params[key]
+            if model_params:
+                meta["model_params"] = model_params
+
+        # Merge LangChain metadata from kwargs
+        lc_metadata = kwargs.get("metadata")
+        if lc_metadata:
+            meta.update(lc_metadata)
+
         start_event: dict[str, Any] = {
             "type": "span_start",
             "id": span_id,
@@ -277,6 +314,11 @@ class TraqoCallback(BaseCallbackHandler):
         }
         if tracer.capture_content and prompts:
             start_event["input"] = prompts
+
+        # Extract LangChain tags from kwargs
+        lc_tags = kwargs.get("tags")
+        if lc_tags:
+            start_event["tags"] = lc_tags
 
         tracer.write_event(start_event)
         self._store_run(
@@ -310,6 +352,30 @@ class TraqoCallback(BaseCallbackHandler):
         model = self._extract_model_from_serialized(serialized, **kwargs)
 
         meta: dict[str, Any] = {"provider": "langchain", "model": model}
+
+        # Extract model parameters from invocation_params
+        invocation_params = kwargs.get("invocation_params", {})
+        if invocation_params:
+            model_params: dict[str, Any] = {}
+            for key in (
+                "temperature",
+                "max_tokens",
+                "max_completion_tokens",
+                "top_p",
+                "frequency_penalty",
+                "presence_penalty",
+                "stop",
+            ):
+                if key in invocation_params and invocation_params[key] is not None:
+                    model_params[key] = invocation_params[key]
+            if model_params:
+                meta["model_params"] = model_params
+
+        # Merge LangChain metadata from kwargs
+        lc_metadata = kwargs.get("metadata")
+        if lc_metadata:
+            meta.update(lc_metadata)
+
         start_event: dict[str, Any] = {
             "type": "span_start",
             "id": span_id,
@@ -321,6 +387,11 @@ class TraqoCallback(BaseCallbackHandler):
         }
         if tracer.capture_content and messages:
             start_event["input"] = _messages_to_dicts(messages[0])
+
+        # Extract LangChain tags from kwargs
+        lc_tags = kwargs.get("tags")
+        if lc_tags:
+            start_event["tags"] = lc_tags
 
         tracer.write_event(start_event)
         self._store_run(
@@ -353,6 +424,11 @@ class TraqoCallback(BaseCallbackHandler):
         usage = _extract_token_usage_from_response(response)
         if usage:
             meta["token_usage"] = usage
+
+        # Update model name from response (e.g. Azure OpenAI returns actual model)
+        response_model = (response.llm_output or {}).get("model_name")
+        if response_model:
+            meta["model"] = response_model
 
         end_event: dict[str, Any] = {
             "type": "span_end",
@@ -407,6 +483,22 @@ class TraqoCallback(BaseCallbackHandler):
         tracer.record_span()
         tracer.record_error()
 
+    @_safe_callback
+    def on_llm_new_token(
+        self,
+        token: str,
+        *,
+        run_id: UUID,
+        parent_run_id: UUID | None = None,
+        **kwargs: Any,
+    ) -> None:
+        with self._lock:
+            info = self._runs.get(run_id)
+            if info and "ttft_recorded" not in info:
+                info["ttft_recorded"] = True
+                ttft = (datetime.now(timezone.utc) - info["start"]).total_seconds()
+                info["metadata"]["ttft_s"] = round(ttft, 3)
+
     # -- Tool callbacks --
 
     @_safe_callback
@@ -428,6 +520,13 @@ class TraqoCallback(BaseCallbackHandler):
         start = datetime.now(timezone.utc)
         name = self._name_from_serialized(serialized, "tool", **kwargs)
 
+        meta: dict[str, Any] = {}
+
+        # Merge LangChain metadata from kwargs
+        lc_metadata = kwargs.get("metadata")
+        if lc_metadata:
+            meta.update(lc_metadata)
+
         start_event: dict[str, Any] = {
             "type": "span_start",
             "id": span_id,
@@ -436,8 +535,15 @@ class TraqoCallback(BaseCallbackHandler):
             "ts": start.isoformat(),
             "kind": "tool",
         }
+        if meta:
+            start_event["metadata"] = meta.copy()
         if tracer.capture_content:
             start_event["input"] = input_str
+
+        # Extract LangChain tags from kwargs
+        lc_tags = kwargs.get("tags")
+        if lc_tags:
+            start_event["tags"] = lc_tags
 
         tracer.write_event(start_event)
         self._store_run(
@@ -447,7 +553,7 @@ class TraqoCallback(BaseCallbackHandler):
                 "parent_id": parent_id,
                 "name": name,
                 "start": start,
-                "metadata": {},
+                "metadata": meta,
             },
         )
 
@@ -532,6 +638,13 @@ class TraqoCallback(BaseCallbackHandler):
         start = datetime.now(timezone.utc)
         name = self._name_from_serialized(serialized, "retriever", **kwargs)
 
+        meta: dict[str, Any] = {}
+
+        # Merge LangChain metadata from kwargs
+        lc_metadata = kwargs.get("metadata")
+        if lc_metadata:
+            meta.update(lc_metadata)
+
         start_event: dict[str, Any] = {
             "type": "span_start",
             "id": span_id,
@@ -540,8 +653,15 @@ class TraqoCallback(BaseCallbackHandler):
             "ts": start.isoformat(),
             "kind": "retriever",
         }
+        if meta:
+            start_event["metadata"] = meta.copy()
         if tracer.capture_content:
             start_event["input"] = query
+
+        # Extract LangChain tags from kwargs
+        lc_tags = kwargs.get("tags")
+        if lc_tags:
+            start_event["tags"] = lc_tags
 
         tracer.write_event(start_event)
         self._store_run(
@@ -551,7 +671,7 @@ class TraqoCallback(BaseCallbackHandler):
                 "parent_id": parent_id,
                 "name": name,
                 "start": start,
-                "metadata": {},
+                "metadata": meta,
             },
         )
 
@@ -642,6 +762,13 @@ class TraqoCallback(BaseCallbackHandler):
         start = datetime.now(timezone.utc)
         name = self._name_from_serialized(serialized, "chain", **kwargs)
 
+        meta: dict[str, Any] = {}
+
+        # Merge LangChain metadata from kwargs
+        lc_metadata = kwargs.get("metadata")
+        if lc_metadata:
+            meta.update(lc_metadata)
+
         start_event: dict[str, Any] = {
             "type": "span_start",
             "id": span_id,
@@ -650,8 +777,15 @@ class TraqoCallback(BaseCallbackHandler):
             "ts": start.isoformat(),
             "kind": "chain",
         }
+        if meta:
+            start_event["metadata"] = meta.copy()
         if tracer.capture_content:
             start_event["input"] = inputs
+
+        # Extract LangChain tags from kwargs
+        lc_tags = kwargs.get("tags")
+        if lc_tags:
+            start_event["tags"] = lc_tags
 
         tracer.write_event(start_event)
         self._store_run(
@@ -661,7 +795,7 @@ class TraqoCallback(BaseCallbackHandler):
                 "parent_id": parent_id,
                 "name": name,
                 "start": start,
-                "metadata": {},
+                "metadata": meta,
             },
         )
 
@@ -830,7 +964,7 @@ def _extract_token_usage_from_response(response: LLMResult) -> dict[str, int]:
     """Extract token usage from an LLMResult (callback response format)."""
     usage: dict[str, int] = {}
     llm_output = response.llm_output or {}
-    token_usage = llm_output.get("token_usage", {})
+    token_usage = llm_output.get("token_usage") or llm_output.get("usage") or {}
     if token_usage:
         usage["input_tokens"] = token_usage.get("prompt_tokens", 0)
         usage["output_tokens"] = token_usage.get("completion_tokens", 0)
