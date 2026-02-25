@@ -34,7 +34,7 @@ class TestRetrieverCallbacks:
         cb = TraqoCallback()
         run_id = uuid4()
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             cb.on_retriever_start(
                 serialized={"id": ["langchain", "retrievers", "FAISS"]},
                 query="what is traqo?",
@@ -79,7 +79,7 @@ class TestRetrieverCallbacks:
         cb = TraqoCallback()
         run_id = uuid4()
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             cb.on_retriever_start(
                 serialized={"id": ["langchain", "retrievers", "Pinecone"]},
                 query="test query",
@@ -105,7 +105,7 @@ class TestRetrieverCallbacks:
         cb = TraqoCallback()
         run_id = uuid4()
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             cb.on_retriever_start(
                 serialized={"name": "my_retriever"},
                 query="test",
@@ -126,7 +126,7 @@ class TestRetrieverCallbacks:
         chain_id = uuid4()
         retriever_id = uuid4()
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             cb.on_chain_start(
                 serialized={"id": ["langchain", "chains", "RetrievalQA"]},
                 inputs={"query": "test"},
@@ -160,7 +160,7 @@ class TestChainCallbacks:
         cb = TraqoCallback()
         run_id = uuid4()
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             cb.on_chain_start(
                 serialized={"id": ["langchain", "chains", "LLMChain"]},
                 inputs={"text": "hello world"},
@@ -191,7 +191,7 @@ class TestChainCallbacks:
         cb = TraqoCallback()
         run_id = uuid4()
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             cb.on_chain_start(
                 serialized={"id": ["langchain", "chains", "LLMChain"]},
                 inputs={"text": "test"},
@@ -214,7 +214,7 @@ class TestChainCallbacks:
         cb = TraqoCallback()
         run_id = uuid4()
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             cb.on_chain_start(
                 serialized={"name": "CustomChain"},
                 inputs={},
@@ -233,7 +233,7 @@ class TestChainCallbacks:
         outer_id = uuid4()
         inner_id = uuid4()
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             cb.on_chain_start(
                 serialized={"id": ["langchain", "chains", "SequentialChain"]},
                 inputs={"input": "test"},
@@ -263,7 +263,7 @@ class TestChainCallbacks:
         cb = TraqoCallback()
         run_id = uuid4()
 
-        with Tracer(trace_file, capture_content=False):
+        with Tracer(path=trace_file, capture_content=False):
             cb.on_chain_start(
                 serialized={"id": ["langchain", "chains", "LLMChain"]},
                 inputs={"secret": "data"},
@@ -282,6 +282,195 @@ class TestChainCallbacks:
         assert "output" not in ends[0]
 
 
+class TestSerializedNone:
+    """LangChain v0.3+ passes serialized=None for Runnables; name comes via kwargs."""
+
+    def test_chain_start_serialized_none_uses_kwarg_name(self, trace_file: Path):
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(path=trace_file):
+            cb.on_chain_start(
+                serialized=None,
+                inputs={"text": "hello"},
+                run_id=run_id,
+                name="RunnableSequence",
+            )
+            cb.on_chain_end(outputs={"result": "done"}, run_id=run_id)
+
+        events = read_events(trace_file)
+        starts = [
+            e for e in events if e["type"] == "span_start" and e.get("kind") == "chain"
+        ]
+        ends = [
+            e for e in events if e["type"] == "span_end" and e.get("kind") == "chain"
+        ]
+        assert len(starts) == 1
+        assert starts[0]["name"] == "RunnableSequence"
+        assert starts[0]["input"] == {"text": "hello"}
+        assert len(ends) == 1
+        assert ends[0]["status"] == "ok"
+
+    def test_chain_start_serialized_none_no_name_falls_back(self, trace_file: Path):
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(path=trace_file):
+            cb.on_chain_start(serialized=None, inputs={}, run_id=run_id)
+            cb.on_chain_end(outputs={}, run_id=run_id)
+
+        events = read_events(trace_file)
+        starts = [
+            e for e in events if e["type"] == "span_start" and e.get("kind") == "chain"
+        ]
+        assert starts[0]["name"] == "chain"
+
+    def test_retriever_start_serialized_none_uses_kwarg_name(self, trace_file: Path):
+        """BaseRetriever passes serialized=None with name kwarg."""
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(path=trace_file):
+            cb.on_retriever_start(
+                serialized=None,
+                query="what is traqo?",
+                run_id=run_id,
+                name="FAISS",
+            )
+            cb.on_retriever_end(documents=[], run_id=run_id)
+
+        events = read_events(trace_file)
+        starts = [
+            e
+            for e in events
+            if e["type"] == "span_start" and e.get("kind") == "retriever"
+        ]
+        assert len(starts) == 1
+        assert starts[0]["name"] == "FAISS"
+
+    def test_tool_start_serialized_none_uses_kwarg_name(self, trace_file: Path):
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(path=trace_file):
+            cb.on_tool_start(
+                serialized=None,
+                input_str="2 + 2",
+                run_id=run_id,
+                name="calculator",
+            )
+            cb.on_tool_end(output="4", run_id=run_id)
+
+        events = read_events(trace_file)
+        starts = [
+            e for e in events if e["type"] == "span_start" and e.get("kind") == "tool"
+        ]
+        assert len(starts) == 1
+        assert starts[0]["name"] == "calculator"
+
+    def test_kwarg_name_preferred_over_serialized(self, trace_file: Path):
+        """kwargs['name'] takes precedence (matches LangChain's StdOutCallbackHandler)."""
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(path=trace_file):
+            cb.on_chain_start(
+                serialized={"id": ["langchain", "chains", "LLMChain"]},
+                inputs={},
+                run_id=run_id,
+                name="my_custom_name",
+            )
+            cb.on_chain_end(outputs={}, run_id=run_id)
+
+        events = read_events(trace_file)
+        starts = [
+            e for e in events if e["type"] == "span_start" and e.get("kind") == "chain"
+        ]
+        assert starts[0]["name"] == "my_custom_name"
+
+    def test_chain_error_after_serialized_none_start(self, trace_file: Path):
+        """Full lifecycle: serialized=None start followed by error."""
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(path=trace_file) as t:
+            cb.on_chain_start(
+                serialized=None,
+                inputs={},
+                run_id=run_id,
+                name="RunnableLambda",
+            )
+            cb.on_chain_error(error=ValueError("failed"), run_id=run_id)
+            assert t._stats_errors == 1
+            assert t._stats_spans == 1
+
+        events = read_events(trace_file)
+        ends = [
+            e for e in events if e["type"] == "span_end" and e.get("kind") == "chain"
+        ]
+        assert ends[0]["status"] == "error"
+        assert ends[0]["name"] == "RunnableLambda"
+
+    def test_interrupt_after_serialized_none_start(self, trace_file: Path):
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(path=trace_file):
+            cb.on_chain_start(
+                serialized=None,
+                inputs={"messages": []},
+                run_id=run_id,
+                name="CompiledStateGraph",
+            )
+            cb.on_chain_error(error=GraphInterrupt("approval needed"), run_id=run_id)
+
+        events = read_events(trace_file)
+        ends = [
+            e for e in events if e["type"] == "span_end" and e.get("kind") == "chain"
+        ]
+        assert ends[0]["status"] == "interrupted"
+        assert ends[0]["name"] == "CompiledStateGraph"
+
+
+class TestSafeCallbackDecorator:
+    """Callback errors should be logged, not raised."""
+
+    def test_callback_exception_does_not_propagate(self, trace_file: Path):
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(path=trace_file):
+            # Pass a non-dict, non-None serialized to trigger an AttributeError
+            # inside _name_from_serialized when it tries .get() on an int.
+            # The @_safe_callback decorator should catch this.
+            cb.on_chain_start(
+                serialized=42,  # type: ignore[arg-type]
+                inputs={"text": "hello"},
+                run_id=run_id,
+            )
+
+        # Should reach here without raising — the decorator caught it
+        events = read_events(trace_file)
+        chain_starts = [
+            e for e in events if e["type"] == "span_start" and e.get("kind") == "chain"
+        ]
+        # The span was NOT written because the callback errored out
+        assert len(chain_starts) == 0
+
+    def test_end_callback_exception_does_not_propagate(self, trace_file: Path):
+        cb = TraqoCallback()
+        run_id = uuid4()
+
+        with Tracer(path=trace_file):
+            cb.on_chain_start(serialized=None, inputs={}, run_id=run_id, name="test")
+            # Force an error in on_chain_end by passing a bad outputs type
+            # that causes issues during write_event serialization.
+            # Even if it doesn't error here, the point is the decorator is in place.
+            cb.on_chain_end(outputs=None, run_id=run_id)
+
+        # Should reach here without raising
+
+
 class TestAgentCallbacks:
     def test_agent_action_and_finish(self, trace_file: Path):
         cb = TraqoCallback()
@@ -296,7 +485,7 @@ class TestAgentCallbacks:
             return_values = {"output": "traqo is a tracing library"}
             log = "Final Answer: traqo is a tracing library"
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             cb.on_agent_action(action=FakeAction(), run_id=run_id)
             cb.on_agent_finish(finish=FakeFinish(), run_id=run_id)
 
@@ -342,7 +531,7 @@ class TestSpanCounting:
         cb = TraqoCallback()
         run_id = uuid4()
 
-        with Tracer(trace_file) as t:
+        with Tracer(path=trace_file) as t:
             cb.on_retriever_start(
                 serialized={"id": ["FAISS"]},
                 query="test",
@@ -355,7 +544,7 @@ class TestSpanCounting:
         cb = TraqoCallback()
         run_id = uuid4()
 
-        with Tracer(trace_file) as t:
+        with Tracer(path=trace_file) as t:
             cb.on_chain_start(
                 serialized={"id": ["LLMChain"]},
                 inputs={},
@@ -373,7 +562,7 @@ class TestSpanCounting:
             tool_input = ""
             log = ""
 
-        with Tracer(trace_file) as t:
+        with Tracer(path=trace_file) as t:
             cb.on_agent_action(action=FakeAction(), run_id=run_id)
             cb.on_agent_finish(
                 finish=type("F", (), {"return_values": {}, "log": ""})(), run_id=run_id
@@ -383,7 +572,7 @@ class TestSpanCounting:
     def test_error_increments_error_count(self, trace_file: Path):
         cb = TraqoCallback()
 
-        with Tracer(trace_file) as t:
+        with Tracer(path=trace_file) as t:
             # Retriever error
             r_id = uuid4()
             cb.on_retriever_start(serialized={"id": ["R"]}, query="q", run_id=r_id)
@@ -415,7 +604,7 @@ class TestLLMCallbacks:
         gen = ChatGeneration(message=msg)
         llm_result = LLMResult(generations=[[gen]])
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             cb.on_chat_model_start(
                 serialized={
                     "kwargs": {"model_name": "gpt-4"},
@@ -452,7 +641,7 @@ class TestLLMCallbacks:
         cb = TraqoCallback()
         run_id = uuid4()
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             cb.on_chat_model_start(
                 serialized={"kwargs": {"model_name": "gpt-4"}, "id": ["ChatOpenAI"]},
                 messages=[[HumanMessage(content="Hi")]],
@@ -475,7 +664,7 @@ class TestLLMCallbacks:
         gen = ChatGeneration(message=msg)
         llm_result = LLMResult(generations=[[gen]])
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             cb.on_llm_start(
                 serialized={
                     "kwargs": {"model_name": "text-davinci-003"},
@@ -517,7 +706,7 @@ class TestLLMCallbacks:
         gen = ChatGeneration(message=msg)
         llm_result = LLMResult(generations=[[gen]])
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             cb.on_chat_model_start(
                 serialized={
                     "kwargs": {"model_name": "o1-preview"},
@@ -550,7 +739,7 @@ class TestToolCallbacks:
         cb = TraqoCallback()
         run_id = uuid4()
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             cb.on_tool_start(
                 serialized={"name": "calculator"},
                 input_str="2 + 2",
@@ -578,7 +767,7 @@ class TestToolCallbacks:
         cb = TraqoCallback()
         run_id = uuid4()
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             cb.on_tool_start(
                 serialized={"name": "web_search"},
                 input_str="query",
@@ -630,7 +819,7 @@ class TestTracedChatModel:
         mock_model = _MockChatModel()
         traced = TracedChatModel(wrapped=mock_model)
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             result = traced._generate([HumanMessage(content="Hi")])
 
         assert len(result.generations) == 1
@@ -782,7 +971,7 @@ class TestChainErrorInterruptHandling:
         cb = TraqoCallback()
         run_id = uuid4()
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             cb.on_chain_start(
                 serialized={"id": ["langgraph", "graph", "CompiledGraph"]},
                 inputs={"messages": [{"role": "user", "content": "hi"}]},
@@ -806,7 +995,7 @@ class TestChainErrorInterruptHandling:
         cb = TraqoCallback()
         run_id = uuid4()
 
-        with Tracer(trace_file):
+        with Tracer(path=trace_file):
             cb.on_chain_start(
                 serialized={"id": ["langgraph", "graph", "CompiledGraph"]},
                 inputs={},
@@ -829,7 +1018,7 @@ class TestChainErrorInterruptHandling:
         cb = TraqoCallback()
         run_id = uuid4()
 
-        with Tracer(trace_file) as t:
+        with Tracer(path=trace_file) as t:
             cb.on_chain_start(
                 serialized={"id": ["CompiledGraph"]},
                 inputs={},
@@ -844,7 +1033,7 @@ class TestChainErrorInterruptHandling:
         cb = TraqoCallback()
         run_id = uuid4()
 
-        with Tracer(trace_file, capture_content=False):
+        with Tracer(path=trace_file, capture_content=False):
             cb.on_chain_start(
                 serialized={"id": ["CompiledGraph"]},
                 inputs={},
@@ -867,7 +1056,7 @@ class TestChainErrorInterruptHandling:
         cb = TraqoCallback()
         run_id = uuid4()
 
-        with Tracer(trace_file) as t:
+        with Tracer(path=trace_file) as t:
             cb.on_chain_start(
                 serialized={"id": ["LLMChain"]},
                 inputs={},

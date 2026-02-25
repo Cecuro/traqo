@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import functools
+import logging
 import threading
 from datetime import datetime, timezone
 from typing import Any
@@ -20,6 +22,8 @@ except ImportError as err:
 
 from traqo.serialize import serialize_error
 from traqo.tracer import _get_parent_id, _now, _uuid, get_tracer
+
+_logger = logging.getLogger("traqo.integrations.langchain")
 
 
 def _parse_usage_metadata(meta: Any) -> dict[str, int]:
@@ -163,6 +167,19 @@ def _extract_model_name(model: BaseChatModel) -> str:
     return type(model).__name__
 
 
+def _safe_callback(fn):  # type: ignore[no-untyped-def]
+    """Wrap a callback so exceptions are logged instead of crashing the pipeline."""
+
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        try:
+            return fn(self, *args, **kwargs)
+        except Exception:
+            _logger.debug("Error in TraqoCallback.%s", fn.__name__, exc_info=True)
+
+    return wrapper
+
+
 class TraqoCallback(BaseCallbackHandler):
     """LangChain callback handler that auto-traces LLM and tool calls.
 
@@ -172,7 +189,7 @@ class TraqoCallback(BaseCallbackHandler):
     Example::
 
         callback = TraqoCallback()
-        with Tracer("trace.jsonl"):
+        with Tracer("my_trace"):
             result = chain.invoke({"text": "hello"}, config={"callbacks": [callback]})
     """
 
@@ -195,10 +212,32 @@ class TraqoCallback(BaseCallbackHandler):
         with self._lock:
             return self._runs.pop(run_id, None)
 
-    def _extract_model_from_serialized(self, serialized: dict[str, Any]) -> str:
-        kwargs = serialized.get("kwargs", {})
+    @staticmethod
+    def _name_from_serialized(
+        serialized: dict[str, Any] | None, fallback: str, **kwargs: Any
+    ) -> str:
+        """Extract a span name, preferring kwargs['name'] (LangChain v0.3+)."""
+        if "name" in kwargs:
+            return kwargs["name"]
+        if serialized is not None:
+            id_parts = serialized.get("id", [])
+            if id_parts:
+                return id_parts[-1]
+            name = serialized.get("name")
+            if name:
+                return name
+        return fallback
+
+    def _extract_model_from_serialized(
+        self, serialized: dict[str, Any] | None, **kwargs: Any
+    ) -> str:
+        if "name" in kwargs:
+            return kwargs["name"]
+        if serialized is None:
+            return "unknown"
+        ser_kwargs = serialized.get("kwargs", {})
         for key in ("model_name", "model", "deployment_name", "azure_deployment"):
-            val = kwargs.get(key)
+            val = ser_kwargs.get(key)
             if val:
                 return val
         id_parts = serialized.get("id", [])
@@ -206,6 +245,7 @@ class TraqoCallback(BaseCallbackHandler):
 
     # -- LLM callbacks --
 
+    @_safe_callback
     def on_llm_start(
         self,
         serialized: dict[str, Any],
@@ -223,7 +263,7 @@ class TraqoCallback(BaseCallbackHandler):
         span_id = _uuid()
         parent_id = self._resolve_parent_id(parent_run_id)
         start = datetime.now(timezone.utc)
-        model = self._extract_model_from_serialized(serialized)
+        model = self._extract_model_from_serialized(serialized, **kwargs)
 
         meta: dict[str, Any] = {"provider": "langchain", "model": model}
         start_event: dict[str, Any] = {
@@ -250,6 +290,7 @@ class TraqoCallback(BaseCallbackHandler):
             },
         )
 
+    @_safe_callback
     def on_chat_model_start(
         self,
         serialized: dict[str, Any],
@@ -266,7 +307,7 @@ class TraqoCallback(BaseCallbackHandler):
         span_id = _uuid()
         parent_id = self._resolve_parent_id(parent_run_id)
         start = datetime.now(timezone.utc)
-        model = self._extract_model_from_serialized(serialized)
+        model = self._extract_model_from_serialized(serialized, **kwargs)
 
         meta: dict[str, Any] = {"provider": "langchain", "model": model}
         start_event: dict[str, Any] = {
@@ -293,6 +334,7 @@ class TraqoCallback(BaseCallbackHandler):
             },
         )
 
+    @_safe_callback
     def on_llm_end(
         self,
         response: LLMResult,
@@ -334,6 +376,7 @@ class TraqoCallback(BaseCallbackHandler):
                 output_tokens=usage.get("output_tokens", 0),
             )
 
+    @_safe_callback
     def on_llm_error(
         self,
         error: BaseException,
@@ -366,9 +409,10 @@ class TraqoCallback(BaseCallbackHandler):
 
     # -- Tool callbacks --
 
+    @_safe_callback
     def on_tool_start(
         self,
-        serialized: dict[str, Any],
+        serialized: dict[str, Any] | None,
         input_str: str,
         *,
         run_id: UUID,
@@ -382,7 +426,7 @@ class TraqoCallback(BaseCallbackHandler):
         span_id = _uuid()
         parent_id = self._resolve_parent_id(parent_run_id)
         start = datetime.now(timezone.utc)
-        name = serialized.get("name", "tool")
+        name = self._name_from_serialized(serialized, "tool", **kwargs)
 
         start_event: dict[str, Any] = {
             "type": "span_start",
@@ -407,6 +451,7 @@ class TraqoCallback(BaseCallbackHandler):
             },
         )
 
+    @_safe_callback
     def on_tool_end(
         self,
         output: Any,
@@ -436,6 +481,7 @@ class TraqoCallback(BaseCallbackHandler):
         tracer.write_event(end_event)
         tracer.record_span()
 
+    @_safe_callback
     def on_tool_error(
         self,
         error: BaseException,
@@ -467,9 +513,10 @@ class TraqoCallback(BaseCallbackHandler):
 
     # -- Retriever callbacks --
 
+    @_safe_callback
     def on_retriever_start(
         self,
-        serialized: dict[str, Any],
+        serialized: dict[str, Any] | None,
         query: str,
         *,
         run_id: UUID,
@@ -483,8 +530,7 @@ class TraqoCallback(BaseCallbackHandler):
         span_id = _uuid()
         parent_id = self._resolve_parent_id(parent_run_id)
         start = datetime.now(timezone.utc)
-        id_parts = serialized.get("id", [])
-        name = id_parts[-1] if id_parts else serialized.get("name", "retriever")
+        name = self._name_from_serialized(serialized, "retriever", **kwargs)
 
         start_event: dict[str, Any] = {
             "type": "span_start",
@@ -509,6 +555,7 @@ class TraqoCallback(BaseCallbackHandler):
             },
         )
 
+    @_safe_callback
     def on_retriever_end(
         self,
         documents: Any,
@@ -544,6 +591,7 @@ class TraqoCallback(BaseCallbackHandler):
         tracer.write_event(end_event)
         tracer.record_span()
 
+    @_safe_callback
     def on_retriever_error(
         self,
         error: BaseException,
@@ -575,9 +623,10 @@ class TraqoCallback(BaseCallbackHandler):
 
     # -- Chain callbacks --
 
+    @_safe_callback
     def on_chain_start(
         self,
-        serialized: dict[str, Any],
+        serialized: dict[str, Any] | None,
         inputs: dict[str, Any],
         *,
         run_id: UUID,
@@ -591,8 +640,7 @@ class TraqoCallback(BaseCallbackHandler):
         span_id = _uuid()
         parent_id = self._resolve_parent_id(parent_run_id)
         start = datetime.now(timezone.utc)
-        id_parts = serialized.get("id", [])
-        name = id_parts[-1] if id_parts else serialized.get("name", "chain")
+        name = self._name_from_serialized(serialized, "chain", **kwargs)
 
         start_event: dict[str, Any] = {
             "type": "span_start",
@@ -617,6 +665,7 @@ class TraqoCallback(BaseCallbackHandler):
             },
         )
 
+    @_safe_callback
     def on_chain_end(
         self,
         outputs: dict[str, Any],
@@ -646,6 +695,7 @@ class TraqoCallback(BaseCallbackHandler):
         tracer.write_event(end_event)
         tracer.record_span()
 
+    @_safe_callback
     def on_chain_error(
         self,
         error: BaseException,
@@ -697,6 +747,7 @@ class TraqoCallback(BaseCallbackHandler):
 
     # -- Agent callbacks --
 
+    @_safe_callback
     def on_agent_action(
         self,
         action: Any,
@@ -741,6 +792,7 @@ class TraqoCallback(BaseCallbackHandler):
             },
         )
 
+    @_safe_callback
     def on_agent_finish(
         self,
         finish: Any,
@@ -936,7 +988,7 @@ def track_langgraph(graph: Any, callback: TraqoCallback | None = None) -> Any:
         agent = create_react_agent(llm, tools)
         track_langgraph(agent)
 
-        with Tracer("trace.jsonl"):
+        with Tracer("my_trace"):
             result = agent.invoke({"messages": [HumanMessage("hi")]})
     """
     if callback is None:
