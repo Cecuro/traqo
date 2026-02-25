@@ -174,7 +174,7 @@ async function loadTrace(file, targetSpanId) {
     if (data.error) throw new Error(data.error);
     state.events = data.events || [];
     state.traceFile = file;
-    state.parsed = parseEvents(state.events);
+    state.parsed = parseEvents(state.events, file);
     showTraceDetail(targetSpanId);
   } catch (e) {
     showError('Failed to load trace: ' + e.message);
@@ -185,10 +185,18 @@ async function loadTrace(file, targetSpanId) {
 
 // ── Data Processing ──────────────────────────────────────────────────────────
 
-function parseEvents(events) {
+function resolveChildKey(parentFileKey, childData) {
+  if (!parentFileKey) return childData.child_file || childData.child_name + '.jsonl';
+  const parts = parentFileKey.split('/');
+  parts[parts.length - 1] = childData.child_file || childData.child_name + '.jsonl';
+  return parts.join('/');
+}
+
+function parseEvents(events, parentFileKey) {
   const starts = new Map();
   const ends = new Map();
   const logEvents = [];
+  const childTracers = new Map();
   let traceStart = null;
   let traceEnd = null;
 
@@ -198,7 +206,37 @@ function parseEvents(events) {
       case 'trace_end':   traceEnd = ev; break;
       case 'span_start':  starts.set(ev.id, ev); break;
       case 'span_end':    ends.set(ev.id, ev); break;
-      case 'event':       logEvents.push(ev); break;
+      case 'event': {
+        if (ev.name === 'child_started' && ev.data) {
+          const name = ev.data.child_name;
+          const file = resolveChildKey(parentFileKey, ev.data);
+          childTracers.set(name, {
+            name,
+            file,
+            startedTs: ev.ts,
+            stats: null,
+            parsed: null,
+            expanded: false,
+            fetchError: null,
+            loading: false,
+          });
+        } else if (ev.name === 'child_ended' && ev.data) {
+          const name = ev.data.child_name;
+          const entry = childTracers.get(name);
+          if (entry) {
+            entry.stats = {
+              spans: ev.data.spans,
+              total_input_tokens: ev.data.total_input_tokens,
+              total_output_tokens: ev.data.total_output_tokens,
+              duration_s: ev.data.duration_s,
+            };
+            if (ev.data.child_file) entry.file = resolveChildKey(parentFileKey, ev.data);
+          }
+        } else {
+          logEvents.push(ev);
+        }
+        break;
+      }
     }
   }
 
@@ -222,7 +260,7 @@ function parseEvents(events) {
     });
   }
 
-  return { spans, logEvents, traceStart, traceEnd };
+  return { spans, logEvents, traceStart, traceEnd, childTracers };
 }
 
 function tracesInDir(prefix) {
@@ -333,14 +371,15 @@ function renderTraceRow(t) {
   </div>`;
 }
 
-function renderSpanNode(span, depth, t0, dur) {
+function renderSpanNode(span, depth, t0, dur, qualifiedId) {
   const s0 = span.ts_start ? new Date(span.ts_start).getTime() : t0;
   const s1 = span.ts_end ? new Date(span.ts_end).getTime() : s0;
   const left = ((s0 - t0) / dur * 100).toFixed(1);
   const width = Math.max((s1 - s0) / dur * 100, 1).toFixed(1);
   const isErr = span.status === 'error';
+  const spanId = qualifiedId || span.id;
 
-  return `<div class="span-node${isErr ? ' error' : ''}" style="--depth:${depth}" data-span-id="${esc(span.id)}" data-action="select-span">
+  return `<div class="span-node${isErr ? ' error' : ''}" style="--depth:${depth}" data-span-id="${esc(spanId)}" data-action="select-span">
     <div class="span-info">
       <span class="status-dot ${isErr ? 'error' : 'ok'}"></span>
       ${span.kind ? `<span class="badge ${kindBadge(span.kind)}">${esc(span.kind)}</span>` : ''}
@@ -551,8 +590,92 @@ function showTraceDetail(targetSpanId) {
   }
 }
 
+const _childCache = new Map();
+
+function renderChildNode(child, depth, t0, dur) {
+  const chevron = child.expanded ? '\u25BC' : '\u25B6';
+  const statsHtml = child.stats
+    ? `<span class="tok"><span class="in">${fmtN(child.stats.total_input_tokens)}</span>/<span class="out">${fmtN(child.stats.total_output_tokens)}</span></span> &middot; ${fmtDur(child.stats.duration_s)} &middot; ${child.stats.spans} spans`
+    : '<span style="color:var(--yellow)">running\u2026</span>';
+
+  let h = `<div class="child-trace-node${child.expanded ? ' expanded' : ''}" style="--depth:${depth}" data-child-name="${esc(child.name)}" data-action="toggle-child">
+    <div class="span-info">
+      <span class="child-chevron">${chevron}</span>
+      <span class="badge badge-child">child</span>
+      <span class="name">${esc(child.name)}</span>
+      <span class="child-stats">${statsHtml}</span>
+    </div>
+    <div class="span-timing">
+      <a class="child-open-link" data-action="open-child" data-file="${esc(child.file)}" title="Open full trace">open \u2197</a>
+    </div>
+  </div>`;
+
+  if (child.expanded) {
+    h += `<div class="child-trace-content" style="--depth:${depth}">`;
+    if (child.loading) {
+      h += '<div class="child-loading">Loading child trace\u2026</div>';
+    } else if (child.fetchError) {
+      h += `<div class="child-error">Failed to load: ${esc(child.fetchError)}</div>`;
+    } else if (child.parsed) {
+      h += renderChildSpanTree(child, depth + 1, t0, dur);
+    }
+    h += '</div>';
+  }
+  return h;
+}
+
+function renderChildSpanTree(child, depth, parentT0, parentDur) {
+  const { spans, logEvents, traceStart, traceEnd, childTracers } = child.parsed;
+  const t0 = traceStart?.ts ? new Date(traceStart.ts).getTime() : parentT0;
+  const t1 = traceEnd?.ts ? new Date(traceEnd.ts).getTime() : t0;
+  const dur = t1 - t0 || 1;
+
+  const roots = [];
+  const spanChildren = new Map();
+  for (const s of spans) {
+    if (!s.parent_id) {
+      roots.push(s);
+    } else {
+      if (!spanChildren.has(s.parent_id)) spanChildren.set(s.parent_id, []);
+      spanChildren.get(s.parent_id).push(s);
+    }
+  }
+  const sortByStart = arr => arr.sort((a, b) => (a.ts_start || '') < (b.ts_start || '') ? -1 : 1);
+  for (const c of spanChildren.values()) sortByStart(c);
+  sortByStart(roots);
+
+  function buildSubtree(span, d) {
+    let h = renderSpanNode(span, d, t0, dur, 'child:' + child.name + ':' + span.id);
+    for (const ch of spanChildren.get(span.id) || []) h += buildSubtree(ch, d + 1);
+    return h;
+  }
+
+  // Build unified items: root spans + grandchildren
+  const items = [];
+  for (const r of roots) items.push({ type: 'span', span: r, ts: r.ts_start || '' });
+  if (childTracers) {
+    for (const [, gc] of childTracers) items.push({ type: 'child', child: gc, ts: gc.startedTs || '' });
+  }
+  items.sort((a, b) => (a.ts || '') < (b.ts || '') ? -1 : 1);
+
+  let h = '';
+  for (const item of items) {
+    if (item.type === 'span') h += buildSubtree(item.span, depth);
+    else h += renderChildNode(item.child, depth, t0, dur);
+  }
+
+  for (const ev of logEvents) {
+    h += `<div class="span-node" style="--depth:${depth};opacity:0.6" data-span-id="ev-${esc(ev.id)}" data-action="select-event" data-event-id="${esc(ev.id)}" data-child-context="${esc(child.name)}">
+      <div class="span-info"><span class="status-dot ok" style="background:var(--yellow)"></span><span class="badge badge-kind">event</span>
+      <span class="name">${esc(ev.name)}</span></div>
+      <div class="span-timing"></div></div>`;
+  }
+
+  return h || '<div style="padding:8px 0 8px calc(12px + ' + depth + ' * 20px);color:var(--text-dim);font-size:12px">No spans</div>';
+}
+
 function renderSpanTree() {
-  const { spans, logEvents, traceStart, traceEnd } = state.parsed;
+  const { spans, logEvents, traceStart, traceEnd, childTracers } = state.parsed;
   const t0 = traceStart?.ts ? new Date(traceStart.ts).getTime() : 0;
   const t1 = traceEnd?.ts ? new Date(traceEnd.ts).getTime() : 0;
   const dur = t1 - t0 || 1;
@@ -588,8 +711,18 @@ function renderSpanTree() {
       <div class="span-timing"><span class="duration">${fmtDur(traceEnd?.duration_s)}</span></div></div>`;
   }
 
-  // Span nodes
-  for (const root of roots) html += buildSubtree(root, 0);
+  // Build unified items: root spans + child tracers, sorted by timestamp
+  const items = [];
+  for (const r of roots) items.push({ type: 'span', span: r, ts: r.ts_start || '' });
+  if (childTracers) {
+    for (const [, ct] of childTracers) items.push({ type: 'child', child: ct, ts: ct.startedTs || '' });
+  }
+  items.sort((a, b) => (a.ts || '') < (b.ts || '') ? -1 : 1);
+
+  for (const item of items) {
+    if (item.type === 'span') html += buildSubtree(item.span, 0);
+    else html += renderChildNode(item.child, 0, t0, dur);
+  }
 
   // Log event nodes
   for (const ev of logEvents) {
@@ -602,22 +735,66 @@ function renderSpanTree() {
   $('span-tree').innerHTML = html || '<div class="empty-state"><div class="msg">No spans</div></div>';
 }
 
+async function fetchChildTrace(child) {
+  child.loading = true;
+  renderSpanTree();
+  try {
+    const res = await fetch('/api/trace?file=' + encodeURIComponent(child.file));
+    if (!res.ok) throw new Error(res.status === 404 ? 'Child trace not found' : `Server error ${res.status}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    const parsed = parseEvents(data.events || [], child.file);
+    child.parsed = parsed;
+    child.fetchError = null;
+    _childCache.set(child.file, parsed);
+  } catch (e) {
+    child.fetchError = e.message;
+  } finally {
+    child.loading = false;
+    renderSpanTree();
+  }
+}
+
+function toggleChild(childName) {
+  if (!state.parsed?.childTracers) return;
+  const child = state.parsed.childTracers.get(childName);
+  if (!child) return;
+
+  if (child.expanded) {
+    child.expanded = false;
+    renderSpanTree();
+  } else {
+    child.expanded = true;
+    if (_childCache.has(child.file)) {
+      child.parsed = _childCache.get(child.file);
+      renderSpanTree();
+    } else {
+      fetchChildTrace(child);
+    }
+  }
+}
+
+function findChildByName(name, parsed) {
+  if (!parsed?.childTracers) return null;
+  return parsed.childTracers.get(name) || null;
+}
+
+function findNestedChild(qualifiedName) {
+  // qualifiedName can be "childA" or nested "childA>childB"
+  const parts = qualifiedName.split('>');
+  let current = state.parsed;
+  let child = null;
+  for (const part of parts) {
+    child = findChildByName(part, current);
+    if (!child?.parsed) return child;
+    current = child.parsed;
+  }
+  return child;
+}
+
 // ── Span Detail ──────────────────────────────────────────────────────────────
 
-function selectSpan(spanId) {
-  if (!state.parsed) return;
-  const span = state.parsed.spans.find(s => s.id === spanId);
-  if (!span) return;
-  state.selectedSpan = spanId;
-  document.querySelectorAll('.span-node').forEach(n => n.classList.toggle('selected', n.dataset.spanId === spanId));
-  _copy.data.clear();
-  _copy.id = 0;
-
-  // Update URL without creating history entry
-  if (state.traceFile) {
-    history.replaceState(null, '', '#trace:' + encodeURIComponent(state.traceFile) + '@' + encodeURIComponent(spanId));
-  }
-
+function renderSpanDetail(span) {
   let h = `<div class="detail-header">
     <span class="name">${esc(span.name)}</span>
     ${span.kind ? `<span class="badge ${kindBadge(span.kind)}">${esc(span.kind)}</span>` : ''}
@@ -633,7 +810,7 @@ function selectSpan(spanId) {
     </table></div>`;
   }
 
-  if (span.tags.length) {
+  if (span.tags?.length) {
     h += `<div class="detail-section"><div class="section-header">Tags</div>
       <div class="tags-row">${span.tags.map(t => `<span class="badge badge-tag">${esc(t)}</span>`).join('')}</div></div>`;
   }
@@ -666,13 +843,58 @@ function selectSpan(spanId) {
     if (Object.keys(m).length) h += jsonSection('Metadata', m);
   }
 
-  $('span-detail').innerHTML = h;
+  return h;
+}
+
+function selectSpan(spanId) {
+  if (!state.parsed) return;
+
+  // Handle child span qualified IDs: child:{childName}:{spanId}
+  if (spanId.startsWith('child:')) {
+    selectChildSpan(spanId);
+    return;
+  }
+
+  const span = state.parsed.spans.find(s => s.id === spanId);
+  if (!span) return;
+  state.selectedSpan = spanId;
+  document.querySelectorAll('.span-node, .child-trace-node').forEach(n => n.classList.toggle('selected', n.dataset.spanId === spanId));
+  _copy.data.clear();
+  _copy.id = 0;
+
+  // Update URL without creating history entry
+  if (state.traceFile) {
+    history.replaceState(null, '', '#trace:' + encodeURIComponent(state.traceFile) + '@' + encodeURIComponent(spanId));
+  }
+
+  $('span-detail').innerHTML = renderSpanDetail(span);
+}
+
+function selectChildSpan(qualifiedId) {
+  // Format: child:{childName}:{spanId}
+  const parts = qualifiedId.split(':');
+  if (parts.length < 3) return;
+  const childName = parts[1];
+  const spanId = parts.slice(2).join(':');
+
+  const child = state.parsed?.childTracers?.get(childName);
+  if (!child?.parsed) return;
+
+  const span = child.parsed.spans.find(s => s.id === spanId);
+  if (!span) return;
+
+  state.selectedSpan = qualifiedId;
+  document.querySelectorAll('.span-node, .child-trace-node').forEach(n => n.classList.toggle('selected', n.dataset.spanId === qualifiedId));
+  _copy.data.clear();
+  _copy.id = 0;
+
+  $('span-detail').innerHTML = renderSpanDetail(span);
 }
 
 function selectTraceIO() {
   if (!state.parsed) return;
   state.selectedSpan = '__trace__';
-  document.querySelectorAll('.span-node').forEach(n => n.classList.toggle('selected', n.dataset.spanId === '__trace__'));
+  document.querySelectorAll('.span-node, .child-trace-node').forEach(n => n.classList.toggle('selected', n.dataset.spanId === '__trace__'));
   _copy.data.clear();
   _copy.id = 0;
 
@@ -693,7 +915,7 @@ function selectEvent(evId) {
   const ev = state.parsed.logEvents.find(e => e.id === evId);
   if (!ev) return;
   state.selectedSpan = 'ev-' + evId;
-  document.querySelectorAll('.span-node').forEach(n => n.classList.toggle('selected', n.dataset.spanId === state.selectedSpan));
+  document.querySelectorAll('.span-node, .child-trace-node').forEach(n => n.classList.toggle('selected', n.dataset.spanId === state.selectedSpan));
   _copy.data.clear();
   _copy.id = 0;
 
@@ -706,7 +928,7 @@ function selectEvent(evId) {
 // ── Keyboard Navigation ─────────────────────────────────────────────────────
 
 function navigateSpanTree(direction) {
-  const nodes = [...document.querySelectorAll('.span-node')];
+  const nodes = [...document.querySelectorAll('.span-node, .child-trace-node')];
   if (!nodes.length) return;
 
   const idx = nodes.findIndex(n => n.classList.contains('selected'));
@@ -722,6 +944,7 @@ function navigateSpanTree(direction) {
   if (action === 'select-span') selectSpan(node.dataset.spanId);
   else if (action === 'select-trace-io') selectTraceIO();
   else if (action === 'select-event') selectEvent(node.dataset.eventId);
+  else if (action === 'toggle-child') toggleChild(node.dataset.childName);
 
   node.scrollIntoView({ block: 'nearest' });
 }
@@ -805,6 +1028,8 @@ function initEventListeners() {
       case 'select-span':    selectSpan(el.dataset.spanId); break;
       case 'select-trace-io': selectTraceIO(); break;
       case 'select-event':   selectEvent(el.dataset.eventId); break;
+      case 'toggle-child':   { e.stopPropagation(); toggleChild(el.dataset.childName); break; }
+      case 'open-child':     { e.stopPropagation(); goto('trace:' + el.dataset.file); break; }
       case 'toggle-section': {
         const t = document.getElementById(el.dataset.target);
         const tog = el.querySelector('.toggle');
