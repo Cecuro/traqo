@@ -1,30 +1,6 @@
 # Changelog
 
-## 0.3.0 (2026-02-24)
-
-### Added
-- **Gemini integration** — `traced_gemini()` wraps Google GenAI clients (generate_content, streaming, embeddings)
-- **OpenAI Responses API** — `traced_openai()` now traces `client.responses.create()`
-- **OpenAI embeddings** — `traced_openai()` now traces `client.embeddings.create()`
-- **Bare `@trace`** — use `@trace` without parentheses (equivalent to `@trace()`)
-- **`update_current_span()`** — convenience helper to update span metadata/output/tags from anywhere
-- **Span kind constants** — `LLM`, `TOOL`, `RETRIEVER`, `CHAIN`, `AGENT`, `EMBEDDING`, `GUARDRAIL`
-- **`ignore_arguments`** on `@trace` — exclude sensitive args from captured input
-- **Generator support** — `@trace` works with sync generators and async generators
-- **Streaming support** — all integrations handle streaming with time-to-first-token (TTFT) tracking
-- **Model parameters** — integrations capture temperature, max_tokens, etc. in span metadata
-- **Storage backends** — `LocalBackend`, `S3Backend`, `GCSBackend` for uploading traces
-
-### Fixed
-- Anthropic streaming TTFT now correctly measures first text token (not first event)
-- Anthropic `.stream()` context manager properly closes spans
-- Thread safety for stats counters
-- Gemini embed_content validates token counts are numeric
-
-### Changed
-- Child tracers use direct parent references instead of monkey-patching `__enter__`/`__exit__`
-
-## 0.2.0 (2026-02-21)
+## 0.2.0 (2026-02-25)
 
 **Breaking changes** — everything is a span.
 
@@ -36,6 +12,7 @@
 - **`trace_end` stats** — `llm_calls` field removed, replaced by `total_input_tokens` / `total_output_tokens`
 - **Child summary** — `llm_calls` replaced by `spans`, `total_input_tokens`, `total_output_tokens`
 - **5 event types** instead of 6: `trace_start`, `span_start`, `span_end`, `event`, `trace_end`
+- Child tracers use direct parent references instead of monkey-patching `__enter__`/`__exit__`
 
 ### Added
 - `Span` class — mutable handle yielded by `tracer.span()`, with `set_output()`, `set_metadata()`, `update_metadata()`
@@ -49,6 +26,29 @@
 - `@trace(metadata=, tags=, kind=)` — pass metadata, tags, and kind through the decorator
 - Token accumulation from `metadata.token_usage` convention — tokens in span metadata are automatically summed in `trace_end` stats
 - Integrations (OpenAI, Anthropic, LangChain) now use span-based tracing with `kind="llm"`
+- **Gemini integration** — `traced_gemini()` wraps Google GenAI clients (generate_content, streaming, embeddings)
+- **OpenAI Responses API** — `traced_openai()` now traces `client.responses.create()`
+- **OpenAI embeddings** — `traced_openai()` now traces `client.embeddings.create()`
+- **Bare `@trace`** — use `@trace` without parentheses (equivalent to `@trace()`)
+- **`update_current_span()`** — convenience helper to update span metadata/output/tags from anywhere
+- **Span kind constants** — `LLM`, `TOOL`, `RETRIEVER`, `CHAIN`, `AGENT`, `EMBEDDING`, `GUARDRAIL`
+- **`ignore_arguments`** on `@trace` — exclude sensitive args from captured input
+- **Generator support** — `@trace` works with sync generators and async generators
+- **Streaming support** — all integrations handle streaming with time-to-first-token (TTFT) tracking
+- **Model parameters** — integrations capture temperature, max_tokens, etc. in span metadata
+- **Storage backends** — `LocalBackend`, `S3Backend`, `GCSBackend` for uploading traces
+- **Built-in trace viewer UI** — `traqo ui` serves a local web dashboard with S3/GCS read support
+- **LangGraph support** — `track_langgraph()` auto-injects TraqoCallback into compiled graphs; `GraphInterrupt`/`NodeInterrupt` handled as control flow (`status="interrupted"`)
+- **LangChain callbacks** — `TraqoCallback` handler for chains, tools, retrievers, and agents
+
+### Fixed
+- Anthropic streaming TTFT now correctly measures first text token (not first event)
+- Anthropic `.stream()` context manager properly closes spans
+- Thread safety for stats counters
+- Gemini embed_content validates token counts are numeric
+- Slotted dataclass serialization
+- ContextVar leak when `_close()` raises
+- `_is_numpy` crash on objects with `__module__ = None`
 
 ## 0.1.0 (2026-02-20)
 
