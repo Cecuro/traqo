@@ -1,6 +1,13 @@
 ---
 name: traqo-tracing
-description: Read, analyze, and write traqo JSONL traces for application observability. Use when: (1) reading or debugging .jsonl trace files, (2) investigating token usage or costs, (3) analyzing pipeline execution flow or errors, (4) adding tracing instrumentation to Python code, (5) querying trace data with grep or DuckDB. Triggers on phrases like "read the trace", "what happened in the pipeline", "token usage", "why did it fail", "add tracing", "trace this function", "check the logs".
+description: >-
+  Read, analyze, and write traqo JSONL traces for application observability.
+  Use when: (1) reading or debugging .jsonl trace files, (2) investigating
+  token usage or costs, (3) analyzing pipeline execution flow or errors,
+  (4) adding tracing instrumentation to Python code, (5) querying trace data
+  with grep or DuckDB. Triggers on phrases like "read the trace", "what
+  happened in the pipeline", "token usage", "why did it fail", "add tracing",
+  "trace this function", "check the logs".
 ---
 
 # traqo Trace Analysis
