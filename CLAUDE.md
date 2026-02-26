@@ -29,10 +29,11 @@ Zero runtime dependencies — only stdlib. Storage backends (S3, GCS) are option
 ## Releasing
 
 1. Bump version in **both** `pyproject.toml` and `traqo/_version.py` (they must match).
-2. Commit the version bump (`chore: bump version to X.Y.Z`).
-3. Push to `main`.
-4. Create a GitHub release with tag `vX.Y.Z` via `gh release create vX.Y.Z --title "vX.Y.Z" --notes "..."`.
-5. The `publish.yml` workflow automatically builds and publishes to PyPI when a release is published.
+2. Verify `SKILL.md` reflects current features (event types, integrations, CLI commands, UI).
+3. Commit the version bump (`chore: bump version to X.Y.Z`).
+4. Push to `main`.
+5. Create a GitHub release with tag `vX.Y.Z` via `gh release create vX.Y.Z --title "vX.Y.Z" --notes "..."`.
+6. The `publish.yml` workflow automatically builds and publishes to PyPI when a release is published.
 
 ## Architecture
 

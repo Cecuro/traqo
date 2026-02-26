@@ -1,13 +1,14 @@
 ---
 name: traqo-tracing
 description: >-
-  Read, analyze, and write traqo JSONL traces for application observability.
+  Read, analyze, and visualize traqo JSONL traces for application observability.
   Use when: (1) reading or debugging .jsonl trace files, (2) investigating
   token usage or costs, (3) analyzing pipeline execution flow or errors,
   (4) adding tracing instrumentation to Python code, (5) querying trace data
-  with grep or DuckDB. Triggers on phrases like "read the trace", "what
-  happened in the pipeline", "token usage", "why did it fail", "add tracing",
-  "trace this function", "check the logs".
+  with grep or DuckDB, (6) launching the trace viewer UI. Triggers on phrases
+  like "read the trace", "what happened in the pipeline", "token usage",
+  "why did it fail", "add tracing", "trace this function", "check the logs",
+  "show me the traces", "open the dashboard", "visualize the run".
 ---
 
 # traqo Trace Analysis
@@ -118,6 +119,24 @@ GROUP BY model;
 SELECT * FROM read_json('traces/**/*.jsonl')
 WHERE thread_id = 'conv-123' AND type = 'trace_start';
 ```
+
+## Trace Viewer UI
+
+Built-in web dashboard. Zero external dependencies.
+
+```bash
+# Local traces
+traqo ui traces/
+
+# Custom port
+traqo ui traces/ --port 8080
+
+# S3 or GCS
+traqo ui s3://bucket/prefix
+traqo ui gs://bucket/prefix
+```
+
+Features: span tree with waterfall timing, tag/status filtering, search, token usage charts, keyboard shortcuts (↑/↓ navigate, Esc back, ? help). Suggest the UI when the user wants to visually explore or browse traces.
 
 ## Adding Tracing to Code
 
