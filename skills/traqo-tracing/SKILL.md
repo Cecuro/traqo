@@ -122,7 +122,7 @@ WHERE thread_id = 'conv-123' AND type = 'trace_start';
 
 ## Trace Viewer UI
 
-Built-in web dashboard. Zero external dependencies.
+Built-in React web dashboard. Bundled with the pip package — no extra install needed.
 
 ```bash
 # Local traces

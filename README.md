@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="traqo/ui/static/favicon.svg" width="96" height="96" alt="Pedro the Raccoon — traqo mascot">
+  <img src="frontend/public/favicon.svg" width="96" height="96" alt="Pedro the Raccoon — traqo mascot">
 </p>
 
 # traqo

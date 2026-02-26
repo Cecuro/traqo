@@ -94,3 +94,9 @@ pyrightconfig.json
 
 # Keep example traces for the UI demo
 !examples/traces/**/*.jsonl
+
+# Frontend build output (built in CI, not committed)
+traqo/ui/static/
+
+# Frontend dependencies
+frontend/node_modules/

@@ -26,6 +26,25 @@ Zero runtime dependencies — only stdlib. Storage backends (S3, GCS) are option
 - **File creation**: Don't create `.md` or `.txt` files unless explicitly requested.
 - **Simple solutions**: Prefer straightforward code over abstractions. Remove unused code immediately.
 
+## Frontend (Trace Viewer UI)
+
+The UI is a React + TypeScript app built with Vite, located in `frontend/`.
+
+```bash
+cd frontend
+npm ci                  # Install dependencies
+npm run dev             # Dev server on http://localhost:5173 (proxies /api to :7600)
+npm run build           # Production build → ../traqo/ui/static/
+```
+
+During development, run the Python backend alongside the Vite dev server:
+```bash
+traqo ui ./traces       # Backend on :7600
+cd frontend && npm run dev  # Frontend on :5173 with API proxy
+```
+
+The built output (`traqo/ui/static/`) is gitignored — it's generated in CI by `publish.yml` before packaging. The Python server (`traqo/ui/server.py`) serves the built static files and provides SPA fallback routing.
+
 ## Releasing
 
 1. Bump version in **both** `pyproject.toml` and `traqo/_version.py` (they must match).
@@ -33,7 +52,7 @@ Zero runtime dependencies — only stdlib. Storage backends (S3, GCS) are option
 3. Commit the version bump (`chore: bump version to X.Y.Z`).
 4. Push to `main`.
 5. Create a GitHub release with tag `vX.Y.Z` via `gh release create vX.Y.Z --title "vX.Y.Z" --notes "..."`.
-6. The `publish.yml` workflow automatically builds and publishes to PyPI when a release is published.
+6. The `publish.yml` workflow automatically builds the React frontend (`npm ci && npm run build` in `frontend/`), then builds and publishes to PyPI.
 
 ### Agent skill
 
@@ -60,6 +79,7 @@ Parent-child span nesting is tracked via a `ContextVar` span stack (`_span_stack
 - **`integrations/`** — OpenAI and Anthropic use a proxy-wrapper pattern (intercept API calls, delegate via `__getattr__`). LangChain has two approaches: `TraqoCallback` (callback handler writing spans directly) and `TracedChatModel` (BaseChatModel subclass wrapping `_generate`).
 - **`backend.py`** — `Backend` protocol (runtime_checkable) with `on_event()`, `on_trace_complete()`, `close()`. Shared `ThreadPoolExecutor` for background uploads. `flush_backends()` waits + recreates pool (for servers). `shutdown_backends()` waits + tears down (for atexit). An atexit handler is registered on first `submit_background()` call.
 - **`backends/`** — `S3Backend` (requires `traqo[s3]`), `GCSBackend` (requires `traqo[gcs]`), `LocalBackend` (stdlib only, copies to target dir with collision-safe filenames). All are batch-upload backends: `on_event()` is a no-op, upload happens in `on_trace_complete()`.
+- **`ui/server.py`** — Built-in HTTP server for the trace viewer. Serves the React SPA from `ui/static/` (built from `frontend/`) and provides `/api/traces` and `/api/trace` endpoints. Supports local dirs, S3, and GCS sources.
 
 ### Token tracking convention
 

@@ -1,0 +1,122 @@
+@import "tailwindcss";
+
+/* ── Light theme (default) ── */
+:root {
+  --t-bg: #f8f9fb;
+  --t-bg-surface: #f0f1f4;
+  --t-bg-card: #ffffff;
+  --t-bg-hover: #edeef2;
+  --t-bg-selected: #e4e6ed;
+  --t-border: #d5d7de;
+  --t-text: #1a1c23;
+  --t-text-muted: #5f6270;
+  --t-text-dim: #9295a0;
+  --t-accent: #4f6de8;
+  --t-accent-dim: #b4c0f0;
+  --t-ok: #16a34a;
+  --t-ok-dim: rgba(22, 163, 74, 0.10);
+  --t-err: #dc2626;
+  --t-err-dim: rgba(220, 38, 38, 0.08);
+  --t-yellow: #b45309;
+  --t-blue: #2563eb;
+  --t-purple: #7c3aed;
+  --t-orange: #ea580c;
+}
+
+/* ── Dark theme ── */
+.dark {
+  --t-bg: #0f1117;
+  --t-bg-surface: #141620;
+  --t-bg-card: #181a24;
+  --t-bg-hover: #1e2028;
+  --t-bg-selected: #232630;
+  --t-border: #25272f;
+  --t-text: #e4e4e7;
+  --t-text-muted: #8b8d97;
+  --t-text-dim: #5a5c66;
+  --t-accent: #6c8cff;
+  --t-accent-dim: #3a4d8c;
+  --t-ok: #34d399;
+  --t-ok-dim: rgba(52, 211, 153, 0.12);
+  --t-err: #f87171;
+  --t-err-dim: rgba(248, 113, 113, 0.12);
+  --t-yellow: #fbbf24;
+  --t-blue: #60a5fa;
+  --t-purple: #a78bfa;
+  --t-orange: #fb923c;
+}
+
+/* ── Tailwind theme tokens → CSS vars ── */
+@theme {
+  --color-bg: var(--t-bg);
+  --color-bg-surface: var(--t-bg-surface);
+  --color-bg-card: var(--t-bg-card);
+  --color-bg-hover: var(--t-bg-hover);
+  --color-bg-selected: var(--t-bg-selected);
+  --color-border: var(--t-border);
+  --color-text: var(--t-text);
+  --color-text-muted: var(--t-text-muted);
+  --color-text-dim: var(--t-text-dim);
+  --color-accent: var(--t-accent);
+  --color-accent-dim: var(--t-accent-dim);
+  --color-ok: var(--t-ok);
+  --color-ok-dim: var(--t-ok-dim);
+  --color-err: var(--t-err);
+  --color-err-dim: var(--t-err-dim);
+  --color-yellow: var(--t-yellow);
+  --color-blue: var(--t-blue);
+  --color-purple: var(--t-purple);
+  --color-orange: var(--t-orange);
+
+  --font-mono: "SF Mono", "Cascadia Code", "Fira Code", "JetBrains Mono",
+    monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    sans-serif;
+
+  --radius-default: 8px;
+}
+
+/* ── Base styles — must be in @layer base so they don't override utilities ── */
+@layer base {
+  body {
+    font-family: var(--font-sans);
+    background: var(--color-bg);
+    color: var(--color-text);
+    line-height: 1.5;
+    overflow: hidden;
+    height: 100vh;
+  }
+
+  #root {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+
+  ::selection {
+    background: rgba(108, 140, 255, 0.3);
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-text-dim);
+  }
+
+  /* Animations */
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+}

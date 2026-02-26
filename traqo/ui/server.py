@@ -12,6 +12,7 @@ Supports local directories, S3, and GCS:
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import sys
 import urllib.parse
@@ -31,24 +32,10 @@ MIME_TYPES = {
     ".ico": "image/x-icon",
 }
 
-
-def _static_mtime(static_dir: Path) -> float:
-    """Return the most recent mtime of any file in the static directory."""
-    latest = 0.0
-    for p in static_dir.rglob("*"):
-        if p.is_file():
-            latest = max(latest, p.stat().st_mtime)
-    return latest
+_MAX_PORT_ATTEMPTS = 10
 
 
-_RELOAD_SCRIPT = """
-<script>
-(function(){var mt=0;setInterval(function(){fetch('/api/mtime').then(r=>r.json()).then(d=>{if(mt&&d.mtime!==mt)location.reload();mt=d.mtime;}).catch(()=>{});},1000);})();
-</script>
-"""
-
-
-def _make_handler(source: TraceSource, static_dir: Path, *, dev: bool = False):
+def _make_handler(source: TraceSource, static_dir: Path):
     """Create a request handler class bound to the given source."""
 
     class TraqoHandler(SimpleHTTPRequestHandler):
@@ -62,8 +49,6 @@ def _make_handler(source: TraceSource, static_dir: Path, *, dev: bool = False):
                 qs = urllib.parse.parse_qs(parsed.query)
                 file_param = qs.get("file", [None])[0]
                 self._handle_trace_detail(file_param)
-            elif path == "/api/mtime":
-                self._json_response({"mtime": _static_mtime(static_dir)})
             elif path == "/":
                 self._serve_static("index.html")
             else:
@@ -92,14 +77,17 @@ def _make_handler(source: TraceSource, static_dir: Path, *, dev: bool = False):
                 return
 
             if not filepath.is_file():
-                self.send_error(404, "Not found")
-                return
+                # SPA fallback: serve index.html for unmatched paths
+                index = (static_dir / "index.html").resolve()
+                if index.is_file():
+                    filepath = index
+                else:
+                    self.send_error(404, "Not found")
+                    return
 
             ext = filepath.suffix.lower()
             mime = MIME_TYPES.get(ext, "application/octet-stream")
             body = filepath.read_bytes()
-            if dev and ext == ".html":
-                body = body.replace(b"</body>", _RELOAD_SCRIPT.encode() + b"</body>")
             self.send_response(200)
             if mime.startswith("text/") or mime in (
                 "application/javascript",
@@ -139,9 +127,6 @@ def _make_handler(source: TraceSource, static_dir: Path, *, dev: bool = False):
 def serve(
     source_uri: str | Path,
     port: int = 7600,
-    *,
-    dev: bool = False,
-    static_dir: str | Path | None = None,
 ) -> None:
     """Start the traqo trace viewer server."""
     uri = str(source_uri)
@@ -155,20 +140,41 @@ def serve(
 
     source = parse_source(uri)
 
-    static_path = (
-        Path(static_dir).resolve() if static_dir else Path(__file__).parent / "static"
-    )
+    static_path = Path(__file__).parent / "static"
     if not static_path.is_dir():
         print(f"Error: static dir {static_path} not found", file=sys.stderr)
         sys.exit(1)
 
-    handler = _make_handler(source, static_path, dev=dev)
-    server = HTTPServer(("127.0.0.1", port), handler)
+    handler = _make_handler(source, static_path)
+
+    # Try successive ports on EADDRINUSE
+    server = None
+    chosen_port = port
+    for attempt in range(_MAX_PORT_ATTEMPTS):
+        try:
+            server = HTTPServer(("127.0.0.1", chosen_port), handler)
+            break
+        except OSError as exc:
+            if exc.errno in (errno.EADDRINUSE, 48, 98):
+                if attempt == 0:
+                    print(
+                        f"Port {chosen_port} in use, trying next...",
+                        file=sys.stderr,
+                    )
+                chosen_port += 1
+            else:
+                raise
+
+    if server is None:
+        print(
+            f"Error: could not find an open port "
+            f"({port}-{port + _MAX_PORT_ATTEMPTS - 1})",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     print(f"traqo ui — serving traces from {uri}")
-    if dev:
-        print(f"Hot reload enabled — serving static files from {static_path}")
-    print(f"Open http://localhost:{port}")
+    print(f"Open http://localhost:{chosen_port}")
     print("Press Ctrl+C to stop\n")
 
     try:
@@ -197,17 +203,9 @@ def main() -> None:
         action="store_true",
         help="Show cloud listing and download activity",
     )
-    parser.add_argument(
-        "--dev", action="store_true", help="Enable hot reload on static file changes"
-    )
-    parser.add_argument(
-        "--static-dir",
-        default=None,
-        help="Override static file directory (for development)",
-    )
     args = parser.parse_args()
     setup_logging(verbose=args.verbose)
-    serve(args.source, args.port, dev=args.dev, static_dir=args.static_dir)
+    serve(args.source, args.port)
 
 
 if __name__ == "__main__":
