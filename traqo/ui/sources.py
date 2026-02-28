@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import tempfile
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -172,11 +173,76 @@ class LocalSource:
 
 
 # ---------------------------------------------------------------------------
+# _CachedCloudSource — shared caching logic for S3 and GCS
+# ---------------------------------------------------------------------------
+
+
+class _CachedCloudSource:
+    """Base for cloud sources with local temp-dir caching.
+
+    Subclasses implement ``_iter_blobs()`` and ``_download()``.
+    """
+
+    def __init__(self, cache_prefix: str, label: str) -> None:
+        self._cache_dir = Path(tempfile.mkdtemp(prefix=f"traqo-{cache_prefix}-"))
+        self._cloud_mtimes: dict[str, float] = {}
+        self._label = label
+
+    # -- abstract (override in subclasses) ----------------------------------
+
+    def _iter_blobs(self) -> Iterator[tuple[str, float]]:
+        """Yield ``(relative_key, mtime_epoch)`` for each ``.jsonl`` object."""
+        raise NotImplementedError
+
+    def _download(self, key: str, dest: Path) -> None:
+        """Download a single object to *dest*."""
+        raise NotImplementedError
+
+    # -- shared logic -------------------------------------------------------
+
+    def list_traces(self) -> list[TraceSummary]:
+        summaries: list[TraceSummary] = []
+        for rel, mtime in self._iter_blobs():
+            self._cloud_mtimes[rel] = mtime
+            summary = TraceSummary(key=rel, file=rel, last_modified=mtime)
+            cached = self._cache_dir / rel
+            if cached.is_file():
+                try:
+                    first, last = _read_first_last_lines(cached)
+                    _enrich_summary(summary, first, last)
+                except Exception:
+                    pass
+            summaries.append(summary)
+        summaries.sort(key=lambda s: s.last_modified or 0, reverse=True)
+        logger.info("listed %d traces from %s", len(summaries), self._label)
+        return summaries
+
+    def read_first_last(
+        self, key: str
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        cached = self._cache_dir / key
+        if cached.is_file():
+            return _read_first_last_lines(cached)
+        return None, None
+
+    def read_all(self, key: str) -> list[dict[str, Any]]:
+        cached = self._cache_dir / key
+        need_download = True
+        if cached.is_file():
+            cloud_mtime = self._cloud_mtimes.get(key)
+            if cloud_mtime is not None and cached.stat().st_mtime >= cloud_mtime:
+                need_download = False
+        if need_download:
+            self._download(key, cached)
+        return _read_jsonl(cached)
+
+
+# ---------------------------------------------------------------------------
 # S3Source
 # ---------------------------------------------------------------------------
 
 
-class S3Source:
+class S3Source(_CachedCloudSource):
     """Read traces from an S3 bucket with local temp-dir cache."""
 
     def __init__(
@@ -194,67 +260,17 @@ class S3Source:
                     "boto3 is not installed. Install with: pip install traqo[s3]"
                 ) from err
             self._client = boto3.client("s3")
-        self._cache_dir = Path(tempfile.mkdtemp(prefix="traqo-s3-"))
-        # key -> last_modified epoch from cloud listing
-        self._cloud_mtimes: dict[str, float] = {}
+        super().__init__("s3", f"s3://{bucket}/{prefix}")
 
-    def list_traces(self) -> list[TraceSummary]:
-        summaries: list[TraceSummary] = []
+    def _iter_blobs(self) -> Iterator[tuple[str, float]]:
         paginator = self._client.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=self._bucket, Prefix=self._prefix):
             for obj in page.get("Contents", []):
-                obj_key: str = obj["Key"]
-                if not obj_key.endswith(".jsonl"):
+                key: str = obj["Key"]
+                if not key.endswith(".jsonl"):
                     continue
-                # Strip prefix for display
-                rel = obj_key[len(self._prefix) :] if self._prefix else obj_key
-                mtime = obj["LastModified"].timestamp()
-                self._cloud_mtimes[rel] = mtime
-
-                summary = TraceSummary(key=rel, file=rel, last_modified=mtime)
-
-                # Enrich from cache if available
-                cached = self._cache_dir / rel
-                if cached.is_file():
-                    try:
-                        first, last = _read_first_last_lines(cached)
-                        _enrich_summary(summary, first, last)
-                    except Exception:
-                        pass
-
-                summaries.append(summary)
-
-        # Sort by last_modified descending
-        summaries.sort(key=lambda s: s.last_modified or 0, reverse=True)
-        logger.info(
-            "listed %d traces from s3://%s/%s",
-            len(summaries),
-            self._bucket,
-            self._prefix,
-        )
-        return summaries
-
-    def read_first_last(
-        self, key: str
-    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-        cached = self._cache_dir / key
-        if cached.is_file():
-            return _read_first_last_lines(cached)
-        return None, None
-
-    def read_all(self, key: str) -> list[dict[str, Any]]:
-        cached = self._cache_dir / key
-        need_download = True
-
-        if cached.is_file():
-            cloud_mtime = self._cloud_mtimes.get(key)
-            if cloud_mtime is not None and cached.stat().st_mtime >= cloud_mtime:
-                need_download = False
-
-        if need_download:
-            self._download(key, cached)
-
-        return _read_jsonl(cached)
+                rel = key[len(self._prefix) :] if self._prefix else key
+                yield rel, obj["LastModified"].timestamp()
 
     def _download(self, key: str, dest: Path) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -268,7 +284,7 @@ class S3Source:
 # ---------------------------------------------------------------------------
 
 
-class GCSSource:
+class GCSSource(_CachedCloudSource):
     """Read traces from a GCS bucket with local temp-dir cache."""
 
     def __init__(
@@ -287,69 +303,22 @@ class GCSSource:
                     "Install with: pip install traqo[gcs]"
                 ) from err
             client = _gcs_storage.Client()
-        self._bucket = client.bucket(bucket)
-        self._cache_dir = Path(tempfile.mkdtemp(prefix="traqo-gcs-"))
-        self._cloud_mtimes: dict[str, float] = {}
+        self._gcs_bucket = client.bucket(bucket)
+        super().__init__("gcs", f"gs://{bucket}/{prefix}")
 
-    def list_traces(self) -> list[TraceSummary]:
-        summaries: list[TraceSummary] = []
-        blobs = self._bucket.list_blobs(prefix=self._prefix or None)
-        for blob in blobs:
+    def _iter_blobs(self) -> Iterator[tuple[str, float]]:
+        for blob in self._gcs_bucket.list_blobs(prefix=self._prefix or None):
             name: str = blob.name
             if not name.endswith(".jsonl"):
                 continue
             rel = name[len(self._prefix) :] if self._prefix else name
-            mtime = blob.updated.timestamp() if blob.updated else 0.0
-            self._cloud_mtimes[rel] = mtime
-
-            summary = TraceSummary(key=rel, file=rel, last_modified=mtime)
-
-            cached = self._cache_dir / rel
-            if cached.is_file():
-                try:
-                    first, last = _read_first_last_lines(cached)
-                    _enrich_summary(summary, first, last)
-                except Exception:
-                    pass
-
-            summaries.append(summary)
-
-        summaries.sort(key=lambda s: s.last_modified or 0, reverse=True)
-        logger.info(
-            "listed %d traces from gs://%s/%s",
-            len(summaries),
-            self._bucket_name,
-            self._prefix,
-        )
-        return summaries
-
-    def read_first_last(
-        self, key: str
-    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-        cached = self._cache_dir / key
-        if cached.is_file():
-            return _read_first_last_lines(cached)
-        return None, None
-
-    def read_all(self, key: str) -> list[dict[str, Any]]:
-        cached = self._cache_dir / key
-        need_download = True
-
-        if cached.is_file():
-            cloud_mtime = self._cloud_mtimes.get(key)
-            if cloud_mtime is not None and cached.stat().st_mtime >= cloud_mtime:
-                need_download = False
-
-        if need_download:
-            self._download(key, cached)
-
-        return _read_jsonl(cached)
+            yield rel, blob.updated.timestamp() if blob.updated else 0.0
 
     def _download(self, key: str, dest: Path) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
         blob_name = f"{self._prefix}{key}"
         logger.info("downloading gs://%s/%s", self._bucket_name, blob_name)
-        blob = self._bucket.blob(blob_name)
+        blob = self._gcs_bucket.blob(blob_name)
         blob.download_to_filename(str(dest))
 
 
