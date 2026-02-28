@@ -301,14 +301,12 @@ class TestS3Source:
         mock_client.download_file.side_effect = fake_download
 
         source = self._make_source(mock_client)
-        # Simulate cloud mtime in the past so cache is valid
-        source._cloud_mtimes["run.jsonl"] = 0.0
 
         # First call downloads
         source.read_all("run.jsonl")
         assert mock_client.download_file.call_count == 1
 
-        # Second call uses cache (file mtime >= cloud mtime of 0.0)
+        # Second call uses cache (trace files are immutable)
         source.read_all("run.jsonl")
         assert mock_client.download_file.call_count == 1
 
@@ -502,11 +500,11 @@ class TestGCSSource:
         mock_blob.download_to_filename.side_effect = fake_download
 
         source = self._make_source(mock_client)
-        source._cloud_mtimes["run.jsonl"] = 0.0
 
         source.read_all("run.jsonl")
         assert mock_blob.download_to_filename.call_count == 1
 
+        # Second call uses cache (trace files are immutable)
         source.read_all("run.jsonl")
         assert mock_blob.download_to_filename.call_count == 1
 

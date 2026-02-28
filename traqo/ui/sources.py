@@ -185,7 +185,6 @@ class _CachedCloudSource:
 
     def __init__(self, cache_prefix: str, label: str) -> None:
         self._cache_dir = Path(tempfile.mkdtemp(prefix=f"traqo-{cache_prefix}-"))
-        self._cloud_mtimes: dict[str, float] = {}
         self._label = label
 
     # -- abstract (override in subclasses) ----------------------------------
@@ -203,7 +202,6 @@ class _CachedCloudSource:
     def list_traces(self) -> list[TraceSummary]:
         summaries: list[TraceSummary] = []
         for rel, mtime in self._iter_blobs():
-            self._cloud_mtimes[rel] = mtime
             summary = TraceSummary(key=rel, file=rel, last_modified=mtime)
             cached = self._cache_dir / rel
             if cached.is_file():
@@ -227,12 +225,7 @@ class _CachedCloudSource:
 
     def read_all(self, key: str) -> list[dict[str, Any]]:
         cached = self._cache_dir / key
-        need_download = True
-        if cached.is_file():
-            cloud_mtime = self._cloud_mtimes.get(key)
-            if cloud_mtime is not None and cached.stat().st_mtime >= cloud_mtime:
-                need_download = False
-        if need_download:
+        if not cached.is_file():
             self._download(key, cached)
         return _read_jsonl(cached)
 
