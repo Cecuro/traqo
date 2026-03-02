@@ -67,6 +67,12 @@ def _extract_response(response: Any) -> tuple[Any, dict[str, int], str]:
             "input_tokens": response.usage.prompt_tokens or 0,
             "output_tokens": response.usage.completion_tokens or 0,
         }
+        # OpenAI cached prompt tokens
+        prompt_details = getattr(response.usage, "prompt_tokens_details", None)
+        if prompt_details:
+            cached = getattr(prompt_details, "cached_tokens", None)
+            if cached:
+                usage["cached_input_tokens"] = cached
 
     model = response.model or ""
     return output, usage, model
@@ -127,6 +133,11 @@ def _aggregate_stream_chunks(chunks: list[Any]) -> tuple[Any, dict[str, int], st
                 "input_tokens": getattr(chunk.usage, "prompt_tokens", 0) or 0,
                 "output_tokens": getattr(chunk.usage, "completion_tokens", 0) or 0,
             }
+            prompt_details = getattr(chunk.usage, "prompt_tokens_details", None)
+            if prompt_details:
+                cached = getattr(prompt_details, "cached_tokens", None)
+                if cached:
+                    usage["cached_input_tokens"] = cached
 
         if not chunk.choices:
             continue
@@ -346,13 +357,16 @@ class _ResponsesStreamWrapper:
             if response:
                 usage = getattr(response, "usage", None)
                 if usage:
-                    self._span.set_metadata(
-                        "token_usage",
-                        {
-                            "input_tokens": getattr(usage, "input_tokens", 0) or 0,
-                            "output_tokens": getattr(usage, "output_tokens", 0) or 0,
-                        },
-                    )
+                    token_usage: dict[str, int] = {
+                        "input_tokens": getattr(usage, "input_tokens", 0) or 0,
+                        "output_tokens": getattr(usage, "output_tokens", 0) or 0,
+                    }
+                    input_details = getattr(usage, "input_tokens_details", None)
+                    if input_details:
+                        cached = getattr(input_details, "cached_tokens", None)
+                        if cached:
+                            token_usage["cached_input_tokens"] = cached
+                    self._span.set_metadata("token_usage", token_usage)
                 model = getattr(response, "model", "")
                 if model:
                     self._span.set_metadata("model", model)
@@ -430,13 +444,16 @@ class _AsyncResponsesStreamWrapper:
             if response:
                 usage = getattr(response, "usage", None)
                 if usage:
-                    self._span.set_metadata(
-                        "token_usage",
-                        {
-                            "input_tokens": getattr(usage, "input_tokens", 0) or 0,
-                            "output_tokens": getattr(usage, "output_tokens", 0) or 0,
-                        },
-                    )
+                    token_usage: dict[str, int] = {
+                        "input_tokens": getattr(usage, "input_tokens", 0) or 0,
+                        "output_tokens": getattr(usage, "output_tokens", 0) or 0,
+                    }
+                    input_details = getattr(usage, "input_tokens_details", None)
+                    if input_details:
+                        cached = getattr(input_details, "cached_tokens", None)
+                        if cached:
+                            token_usage["cached_input_tokens"] = cached
+                    self._span.set_metadata("token_usage", token_usage)
                 model = getattr(response, "model", "")
                 if model:
                     self._span.set_metadata("model", model)
@@ -745,13 +762,16 @@ class _TracedResponses:
                 span.set_metadata("model", model)
                 usage = getattr(response, "usage", None)
                 if usage:
-                    span.set_metadata(
-                        "token_usage",
-                        {
-                            "input_tokens": getattr(usage, "input_tokens", 0) or 0,
-                            "output_tokens": getattr(usage, "output_tokens", 0) or 0,
-                        },
-                    )
+                    token_usage: dict[str, int] = {
+                        "input_tokens": getattr(usage, "input_tokens", 0) or 0,
+                        "output_tokens": getattr(usage, "output_tokens", 0) or 0,
+                    }
+                    input_details = getattr(usage, "input_tokens_details", None)
+                    if input_details:
+                        cached = getattr(input_details, "cached_tokens", None)
+                        if cached:
+                            token_usage["cached_input_tokens"] = cached
+                    span.set_metadata("token_usage", token_usage)
                 if tracer.capture_content:
                     span.set_output(_extract_responses_output(response))
                 return response
@@ -816,13 +836,16 @@ class _TracedAsyncResponses:
                 span.set_metadata("model", model)
                 usage = getattr(response, "usage", None)
                 if usage:
-                    span.set_metadata(
-                        "token_usage",
-                        {
-                            "input_tokens": getattr(usage, "input_tokens", 0) or 0,
-                            "output_tokens": getattr(usage, "output_tokens", 0) or 0,
-                        },
-                    )
+                    token_usage: dict[str, int] = {
+                        "input_tokens": getattr(usage, "input_tokens", 0) or 0,
+                        "output_tokens": getattr(usage, "output_tokens", 0) or 0,
+                    }
+                    input_details = getattr(usage, "input_tokens_details", None)
+                    if input_details:
+                        cached = getattr(input_details, "cached_tokens", None)
+                        if cached:
+                            token_usage["cached_input_tokens"] = cached
+                    span.set_metadata("token_usage", token_usage)
                 if tracer.capture_content:
                     span.set_output(_extract_responses_output(response))
                 return response

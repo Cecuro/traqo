@@ -55,6 +55,7 @@ def _make_chat_response(
     usage = MagicMock()
     usage.prompt_tokens = prompt_tokens
     usage.completion_tokens = completion_tokens
+    usage.prompt_tokens_details = None
     response.usage = usage
     response.model = model
     return response
@@ -74,6 +75,7 @@ def _make_stream_chunk(
         chunk.usage = MagicMock()
         chunk.usage.prompt_tokens = usage.get("prompt_tokens", 0)
         chunk.usage.completion_tokens = usage.get("completion_tokens", 0)
+        chunk.usage.prompt_tokens_details = None
     else:
         chunk.usage = None
 
@@ -153,6 +155,36 @@ class TestCompletionsCreateTextResponse:
 
         assert trace_end["stats"]["total_input_tokens"] == 10
         assert trace_end["stats"]["total_output_tokens"] == 5
+
+
+class TestCompletionsCreateCachedTokens:
+    def test_cached_tokens_in_metadata(self, trace_file: Path):
+        response = _make_chat_response("Cached", "gpt-4o", 100, 50)
+        # Add cached token details
+        response.usage.prompt_tokens_details = MagicMock()
+        response.usage.prompt_tokens_details.cached_tokens = 80
+
+        mock_completions = MagicMock()
+        mock_completions.create.return_value = response
+
+        traced = _TracedCompletions(mock_completions, "")
+
+        with Tracer(path=trace_file):
+            traced.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": "Hi"}],
+            )
+
+        events = read_events(trace_file)
+        span_end = [e for e in events if e["type"] == "span_end"][0]
+        usage = span_end["metadata"]["token_usage"]
+        # OpenAI prompt_tokens already includes cached, so input_tokens = 100
+        assert usage["input_tokens"] == 100
+        assert usage["output_tokens"] == 50
+        assert usage["cached_input_tokens"] == 80
+
+        trace_end = [e for e in events if e["type"] == "trace_end"][0]
+        assert trace_end["stats"]["total_input_tokens"] == 100
 
 
 class TestCompletionsCreateToolCalls:

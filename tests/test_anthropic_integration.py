@@ -77,6 +77,8 @@ def _make_stream_events(
     evt.message.model = model
     evt.message.usage = MagicMock()
     evt.message.usage.input_tokens = input_tokens
+    evt.message.usage.cache_read_input_tokens = None
+    evt.message.usage.cache_creation_input_tokens = None
     events.append(evt)
 
     # content_block_delta for each text part
@@ -169,10 +171,14 @@ class TestMessagesCreateCacheTokens:
         events = read_events(trace_file)
         span_end = [e for e in events if e["type"] == "span_end"][0]
         usage = span_end["metadata"]["token_usage"]
-        assert usage["input_tokens"] == 100
+        # input_tokens includes base (100) + cache_read (30) + cache_creation (10)
+        assert usage["input_tokens"] == 140
         assert usage["output_tokens"] == 50
         assert usage["cache_read_input_tokens"] == 30
         assert usage["cache_creation_input_tokens"] == 10
+
+        trace_end = [e for e in events if e["type"] == "trace_end"][0]
+        assert trace_end["stats"]["total_input_tokens"] == 140
 
 
 class TestMessagesCreateToolUse:
@@ -257,6 +263,64 @@ class TestMessagesCreateSystemMessage:
         assert span_start["input"][1] == {"role": "user", "content": "Hi"}
 
 
+class TestStreamingCacheTokens:
+    def test_streaming_cache_tokens_merged(self, trace_file: Path):
+        events_list = []
+
+        # message_start with cache tokens
+        evt = MagicMock()
+        evt.type = "message_start"
+        evt.message = MagicMock()
+        evt.message.model = "claude-3-sonnet-20240229"
+        evt.message.usage = MagicMock()
+        evt.message.usage.input_tokens = 10
+        evt.message.usage.cache_read_input_tokens = 500
+        evt.message.usage.cache_creation_input_tokens = 200
+        events_list.append(evt)
+
+        # text delta
+        evt = MagicMock()
+        evt.type = "content_block_delta"
+        evt.delta = MagicMock()
+        evt.delta.type = "text_delta"
+        evt.delta.text = "Hello"
+        events_list.append(evt)
+
+        # message_delta
+        evt = MagicMock()
+        evt.type = "message_delta"
+        evt.delta = MagicMock()
+        evt.usage = MagicMock()
+        evt.usage.output_tokens = 5
+        events_list.append(evt)
+
+        mock_messages = MagicMock()
+        mock_messages.create.return_value = iter(events_list)
+
+        traced = _TracedMessages(mock_messages, "")
+
+        with Tracer(path=trace_file):
+            stream = traced.create(
+                model="claude-3-sonnet-20240229",
+                messages=[{"role": "user", "content": "Hi"}],
+                max_tokens=100,
+                stream=True,
+            )
+            list(stream)
+
+        events = read_events(trace_file)
+        span_end = [e for e in events if e["type"] == "span_end"][0]
+        usage = span_end["metadata"]["token_usage"]
+        # input_tokens includes base (10) + cache_read (500) + cache_creation (200)
+        assert usage["input_tokens"] == 710
+        assert usage["output_tokens"] == 5
+        assert usage["cache_read_input_tokens"] == 500
+        assert usage["cache_creation_input_tokens"] == 200
+
+        trace_end = [e for e in events if e["type"] == "trace_end"][0]
+        assert trace_end["stats"]["total_input_tokens"] == 710
+
+
 class TestMessagesStreaming:
     def test_streaming_via_create(self, trace_file: Path):
         stream_events = _make_stream_events(
@@ -336,6 +400,8 @@ class TestStreamingToolUseAggregation:
         evt.message.model = "claude-3-sonnet-20240229"
         evt.message.usage = MagicMock()
         evt.message.usage.input_tokens = 20
+        evt.message.usage.cache_read_input_tokens = None
+        evt.message.usage.cache_creation_input_tokens = None
         events_list.append(evt)
 
         # content_block_start — tool_use
