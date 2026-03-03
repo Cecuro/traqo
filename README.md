@@ -145,6 +145,31 @@ grep '"status":"error"' traces/**/*.jsonl
 grep '"token_usage"' traces/**/*.jsonl | jq '.metadata.token_usage'
 ```
 
+## Claude Code Integration
+
+Convert Claude Code session transcripts into traqo traces — one trace per session with turns, LLM calls, tool calls, and subagent hierarchy.
+
+```bash
+# Sync all sessions
+traqo cc-sync --all --output-dir ./traces
+
+# Sync a single session
+traqo cc-sync path/to/session.jsonl
+
+# View the results
+traqo ui ./traces
+```
+
+**As a Claude Code Stop hook** (`~/.claude/settings.json`):
+
+```json
+{
+  "hooks": {
+    "Stop": [{ "type": "command", "command": "traqo cc-sync --hook" }]
+  }
+}
+```
+
 ## Trace Viewer UI
 
 Browse and inspect traces in your browser. Zero dependencies — uses Python's built-in HTTP server.

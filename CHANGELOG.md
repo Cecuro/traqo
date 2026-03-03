@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.0 (2026-03-03)
+
+### Added
+- **Claude Code integration** — `traqo cc-sync` converts Claude Code session transcripts into traqo traces. Use as a Stop hook or run manually via CLI.
+- **Cache token tracking** — all integrations (Anthropic, OpenAI, LangChain, cc-sync) now track `cache_read_tokens` and `cache_creation_tokens` in span `token_usage` metadata.
+- **Cache totals in trace stats** — `trace_end.stats` includes `total_cache_read_tokens` and `total_cache_creation_tokens`, displayed in the UI summary bar.
+
+### Fixed
+- Anthropic integration: `input_tokens` now includes cache tokens for accurate totals (previously only counted non-cached tokens).
+- OpenAI integration: now extracts `cached_tokens` from `prompt_tokens_details`.
+- Normalized cache token key names across all integrations to `cache_read_tokens` / `cache_creation_tokens`.
+
 ## 0.2.0 (2026-02-25)
 
 **Breaking changes** — everything is a span.

@@ -42,11 +42,11 @@ Every event has `id` and `parent_id` for tree reconstruction. The `kind` field c
 ```
 
 ```json
-{"type":"span_end","id":"x1y2z3","parent_id":"a1b2c3","ts":"2026-02-20T10:00:03Z","name":"classify","kind":"llm","duration_s":1.8,"status":"ok","output":"...","metadata":{"provider":"openai","model":"gpt-4o","token_usage":{"input_tokens":1500,"output_tokens":800}}}
+{"type":"span_end","id":"x1y2z3","parent_id":"a1b2c3","ts":"2026-02-20T10:00:03Z","name":"classify","kind":"llm","duration_s":1.8,"status":"ok","output":"...","metadata":{"provider":"openai","model":"gpt-4o","token_usage":{"input_tokens":1500,"output_tokens":800,"cache_read_tokens":1200,"cache_creation_tokens":0}}}
 ```
 
 ```json
-{"type":"trace_end","ts":"2026-02-20T10:05:00Z","duration_s":300.0,"output":{"response":"..."},"stats":{"spans":15,"events":5,"total_input_tokens":45000,"total_output_tokens":12000,"errors":0},"children":[{"name":"agent_a","path":"traces/agent_a.jsonl","duration_s":45.2,"spans":3,"total_input_tokens":5000,"total_output_tokens":2000}]}
+{"type":"trace_end","ts":"2026-02-20T10:05:00Z","duration_s":300.0,"output":{"response":"..."},"stats":{"spans":15,"events":5,"total_input_tokens":45000,"total_output_tokens":12000,"total_cache_read_tokens":30000,"total_cache_creation_tokens":5000,"errors":0},"children":[{"name":"agent_a","path":"traces/agent_a.jsonl","duration_s":45.2,"spans":3,"total_input_tokens":5000,"total_output_tokens":2000}]}
 ```
 
 ## Common Queries
@@ -62,11 +62,11 @@ tail -1 trace.jsonl | jq '.children[].path'
 
 ### Token Usage
 ```bash
-# Per-span tokens from metadata
+# Per-span tokens from metadata (input_tokens includes cached)
 grep '"token_usage"' trace.jsonl | jq '.metadata.token_usage'
 
-# Total from summary
-tail -1 trace.jsonl | jq '.stats | {total_input_tokens, total_output_tokens}'
+# Total from summary (includes cache breakdown)
+tail -1 trace.jsonl | jq '.stats | {total_input_tokens, total_output_tokens, total_cache_read_tokens, total_cache_creation_tokens}'
 ```
 
 ### Errors
@@ -120,6 +120,23 @@ SELECT * FROM read_json('traces/**/*.jsonl')
 WHERE thread_id = 'conv-123' AND type = 'trace_start';
 ```
 
+## Claude Code Integration
+
+Convert Claude Code session transcripts into traqo traces.
+
+```bash
+# Sync a single session
+traqo cc-sync path/to/session.jsonl
+
+# Sync all sessions from ~/.claude/projects/
+traqo cc-sync --all --output-dir ./traces
+
+# As a Claude Code Stop hook (~/.claude/settings.json)
+# { "hooks": { "Stop": [{ "type": "command", "command": "traqo cc-sync --hook" }] } }
+```
+
+Produces one trace per session with turn spans, LLM spans (with token usage including cache breakdown), tool call spans, and subagent hierarchy.
+
 ## Trace Viewer UI
 
 Built-in React web dashboard. Bundled with the pip package — no extra install needed.
@@ -136,7 +153,7 @@ traqo ui s3://bucket/prefix
 traqo ui gs://bucket/prefix
 ```
 
-Features: span tree with waterfall timing, tag/status filtering, search, token usage charts, keyboard shortcuts (↑/↓ navigate, Esc back, ? help). Suggest the UI when the user wants to visually explore or browse traces.
+Features: span tree with waterfall timing, tag/status filtering, search, token usage charts, cache token totals, keyboard shortcuts (↑/↓ navigate, Esc back, ? help). Suggest the UI when the user wants to visually explore or browse traces.
 
 ## Adding Tracing to Code
 
