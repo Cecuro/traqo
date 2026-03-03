@@ -29,6 +29,9 @@ export function SummaryBar({ parsedTrace, dir }: Props) {
         <span className="text-text-muted">spans</span>
         <Dot />
         <span className="font-mono font-medium text-blue">{fmtN(stats.total_input_tokens ?? 0)}</span>
+        {((stats.total_cache_read_tokens ?? 0) + (stats.total_cache_creation_tokens ?? 0)) > 0 && (
+          <span className="font-mono text-text-dim">({fmtN((stats.total_cache_read_tokens ?? 0) + (stats.total_cache_creation_tokens ?? 0))} cached)</span>
+        )}
         <span className="text-text-muted">in</span>
         <span className="text-text-dim">/</span>
         <span className="font-mono font-medium text-orange">{fmtN(stats.total_output_tokens ?? 0)}</span>

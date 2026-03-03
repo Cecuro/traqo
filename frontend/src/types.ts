@@ -15,6 +15,8 @@ export interface TraceStats {
   events?: number;
   total_input_tokens?: number;
   total_output_tokens?: number;
+  total_cache_read_tokens?: number;
+  total_cache_creation_tokens?: number;
 }
 
 /** Shape returned by /api/trace?file=... */

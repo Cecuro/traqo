@@ -319,6 +319,8 @@ def generate_trace_events(session: ParsedSession) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     total_input_tokens = 0
     total_output_tokens = 0
+    total_cache_read = 0
+    total_cache_create = 0
     span_count = 0
     error_count = 0
 
@@ -393,6 +395,8 @@ def generate_trace_events(session: ParsedSession) -> list[dict[str, Any]]:
             }
             total_input_tokens += token_usage["input_tokens"]
             total_output_tokens += token_usage["output_tokens"]
+            total_cache_read += cache_read
+            total_cache_create += cache_create
 
             if cache_read:
                 token_usage["cache_read_tokens"] = cache_read
@@ -569,6 +573,8 @@ def generate_trace_events(session: ParsedSession) -> list[dict[str, Any]]:
                 }
                 total_input_tokens += nested_token_usage["input_tokens"]
                 total_output_tokens += nested_token_usage["output_tokens"]
+                total_cache_read += nested_cache_read
+                total_cache_create += nested_cache_create
 
                 nested_text = _extract_text(nested_content)
                 nested_tool_uses = _extract_tool_uses(nested_content)
@@ -714,6 +720,8 @@ def generate_trace_events(session: ParsedSession) -> list[dict[str, Any]]:
                 "events": 0,
                 "total_input_tokens": total_input_tokens,
                 "total_output_tokens": total_output_tokens,
+                "total_cache_read_tokens": total_cache_read,
+                "total_cache_creation_tokens": total_cache_create,
                 "errors": error_count,
             },
         }
