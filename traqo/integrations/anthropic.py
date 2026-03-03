@@ -61,10 +61,10 @@ def _extract_response(response: Any) -> tuple[Any, dict[str, int], str]:
         cache_read = getattr(response.usage, "cache_read_input_tokens", None)
         cache_creation = getattr(response.usage, "cache_creation_input_tokens", None)
         if cache_read:
-            usage["cache_read_input_tokens"] = cache_read
+            usage["cache_read_tokens"] = cache_read
             usage["input_tokens"] += cache_read
         if cache_creation:
-            usage["cache_creation_input_tokens"] = cache_creation
+            usage["cache_creation_tokens"] = cache_creation
             usage["input_tokens"] += cache_creation
 
     model = response.model or ""
@@ -115,10 +115,10 @@ def _aggregate_stream_events(events: list[Any]) -> tuple[Any, dict[str, int], st
                         msg_usage, "cache_creation_input_tokens", None
                     )
                     if cache_read:
-                        usage["cache_read_input_tokens"] = cache_read
+                        usage["cache_read_tokens"] = cache_read
                         usage["input_tokens"] += cache_read
                     if cache_creation:
-                        usage["cache_creation_input_tokens"] = cache_creation
+                        usage["cache_creation_tokens"] = cache_creation
                         usage["input_tokens"] += cache_creation
 
         elif event_type == "content_block_start":

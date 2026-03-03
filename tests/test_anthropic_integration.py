@@ -174,8 +174,8 @@ class TestMessagesCreateCacheTokens:
         # input_tokens includes base (100) + cache_read (30) + cache_creation (10)
         assert usage["input_tokens"] == 140
         assert usage["output_tokens"] == 50
-        assert usage["cache_read_input_tokens"] == 30
-        assert usage["cache_creation_input_tokens"] == 10
+        assert usage["cache_read_tokens"] == 30
+        assert usage["cache_creation_tokens"] == 10
 
         trace_end = [e for e in events if e["type"] == "trace_end"][0]
         assert trace_end["stats"]["total_input_tokens"] == 140
@@ -314,8 +314,8 @@ class TestStreamingCacheTokens:
         # input_tokens includes base (10) + cache_read (500) + cache_creation (200)
         assert usage["input_tokens"] == 710
         assert usage["output_tokens"] == 5
-        assert usage["cache_read_input_tokens"] == 500
-        assert usage["cache_creation_input_tokens"] == 200
+        assert usage["cache_read_tokens"] == 500
+        assert usage["cache_creation_tokens"] == 200
 
         trace_end = [e for e in events if e["type"] == "trace_end"][0]
         assert trace_end["stats"]["total_input_tokens"] == 710

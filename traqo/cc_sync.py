@@ -394,16 +394,16 @@ def generate_trace_events(session: ParsedSession) -> list[dict[str, Any]]:
             total_input_tokens += token_usage["input_tokens"]
             total_output_tokens += token_usage["output_tokens"]
 
+            if cache_read:
+                token_usage["cache_read_tokens"] = cache_read
+            if cache_create:
+                token_usage["cache_creation_tokens"] = cache_create
+
             llm_metadata: dict[str, Any] = {
                 "model": am.model,
                 "token_usage": token_usage,
                 "provider": "anthropic",
             }
-            if cache_read or cache_create:
-                llm_metadata["cache_tokens"] = {
-                    "cache_read_input_tokens": cache_read,
-                    "cache_creation_input_tokens": cache_create,
-                }
             if am.request_id:
                 llm_metadata["request_id"] = am.request_id
             if has_thinking:

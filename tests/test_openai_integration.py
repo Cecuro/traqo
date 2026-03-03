@@ -181,7 +181,7 @@ class TestCompletionsCreateCachedTokens:
         # OpenAI prompt_tokens already includes cached, so input_tokens = 100
         assert usage["input_tokens"] == 100
         assert usage["output_tokens"] == 50
-        assert usage["cached_input_tokens"] == 80
+        assert usage["cache_read_tokens"] == 80
 
         trace_end = [e for e in events if e["type"] == "trace_end"][0]
         assert trace_end["stats"]["total_input_tokens"] == 100

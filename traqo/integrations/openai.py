@@ -72,7 +72,7 @@ def _extract_response(response: Any) -> tuple[Any, dict[str, int], str]:
         if prompt_details:
             cached = getattr(prompt_details, "cached_tokens", None)
             if cached:
-                usage["cached_input_tokens"] = cached
+                usage["cache_read_tokens"] = cached
 
     model = response.model or ""
     return output, usage, model
@@ -137,7 +137,7 @@ def _aggregate_stream_chunks(chunks: list[Any]) -> tuple[Any, dict[str, int], st
             if prompt_details:
                 cached = getattr(prompt_details, "cached_tokens", None)
                 if cached:
-                    usage["cached_input_tokens"] = cached
+                    usage["cache_read_tokens"] = cached
 
         if not chunk.choices:
             continue
@@ -365,7 +365,7 @@ class _ResponsesStreamWrapper:
                     if input_details:
                         cached = getattr(input_details, "cached_tokens", None)
                         if cached:
-                            token_usage["cached_input_tokens"] = cached
+                            token_usage["cache_read_tokens"] = cached
                     self._span.set_metadata("token_usage", token_usage)
                 model = getattr(response, "model", "")
                 if model:
@@ -452,7 +452,7 @@ class _AsyncResponsesStreamWrapper:
                     if input_details:
                         cached = getattr(input_details, "cached_tokens", None)
                         if cached:
-                            token_usage["cached_input_tokens"] = cached
+                            token_usage["cache_read_tokens"] = cached
                     self._span.set_metadata("token_usage", token_usage)
                 model = getattr(response, "model", "")
                 if model:
@@ -770,7 +770,7 @@ class _TracedResponses:
                     if input_details:
                         cached = getattr(input_details, "cached_tokens", None)
                         if cached:
-                            token_usage["cached_input_tokens"] = cached
+                            token_usage["cache_read_tokens"] = cached
                     span.set_metadata("token_usage", token_usage)
                 if tracer.capture_content:
                     span.set_output(_extract_responses_output(response))
@@ -844,7 +844,7 @@ class _TracedAsyncResponses:
                     if input_details:
                         cached = getattr(input_details, "cached_tokens", None)
                         if cached:
-                            token_usage["cached_input_tokens"] = cached
+                            token_usage["cache_read_tokens"] = cached
                     span.set_metadata("token_usage", token_usage)
                 if tracer.capture_content:
                     span.set_output(_extract_responses_output(response))

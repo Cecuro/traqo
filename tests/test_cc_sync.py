@@ -640,13 +640,11 @@ class TestGenerateTraceEvents:
         llm_end = [
             e for e in events if e.get("type") == "span_end" and e.get("kind") == "llm"
         ][0]
-        assert llm_end["metadata"]["cache_tokens"]["cache_read_input_tokens"] == 5000
-        assert (
-            llm_end["metadata"]["cache_tokens"]["cache_creation_input_tokens"] == 2000
-        )
-
-        # token_usage.input_tokens includes cache tokens (10 + 5000 + 2000)
-        assert llm_end["metadata"]["token_usage"]["input_tokens"] == 7010
+        usage = llm_end["metadata"]["token_usage"]
+        # input_tokens includes cache tokens (10 + 5000 + 2000)
+        assert usage["input_tokens"] == 7010
+        assert usage["cache_read_tokens"] == 5000
+        assert usage["cache_creation_tokens"] == 2000
 
         # trace_end total also includes cache tokens
         trace_end = events[-1]

@@ -5,6 +5,7 @@ interface Props {
   outputTokens: number;
   reasoningTokens?: number;
   cacheReadTokens?: number;
+  cacheCreationTokens?: number;
 }
 
 export function TokenBar({
@@ -12,6 +13,7 @@ export function TokenBar({
   outputTokens,
   reasoningTokens,
   cacheReadTokens,
+  cacheCreationTokens,
 }: Props) {
   const total = inputTokens + outputTokens || 1;
   const inPct = ((inputTokens / total) * 100).toFixed(1);
@@ -39,6 +41,11 @@ export function TokenBar({
       {cacheReadTokens != null && cacheReadTokens > 0 && (
         <div className="mt-1 text-sm text-text-muted">
           Cache read: {fmtN(cacheReadTokens)}
+        </div>
+      )}
+      {cacheCreationTokens != null && cacheCreationTokens > 0 && (
+        <div className="mt-1 text-sm text-text-muted">
+          Cache creation: {fmtN(cacheCreationTokens)}
         </div>
       )}
     </div>
