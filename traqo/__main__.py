@@ -13,6 +13,7 @@ def main() -> None:
         print()
         print("Commands:")
         print("  ui [TRACES_DIR] [--port PORT]   Start the trace viewer")
+        print("  cc-sync [OPTIONS]               Sync Claude Code sessions to traces")
         sys.exit(0)
 
     command = args[0]
@@ -22,6 +23,11 @@ def main() -> None:
         from traqo.ui.server import main as ui_main
 
         ui_main()
+    elif command == "cc-sync":
+        sys.argv = sys.argv[1:]
+        from traqo.cc_sync import main as cc_sync_main
+
+        cc_sync_main()
     else:
         print(f"Unknown command: {command}", file=sys.stderr)
         print("Run 'python -m traqo --help' for usage.", file=sys.stderr)

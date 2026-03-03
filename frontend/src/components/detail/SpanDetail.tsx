@@ -66,6 +66,7 @@ function SpanContent({ span }: { span: ParsedSpan }) {
         output_tokens?: number;
         reasoning_tokens?: number;
         cache_read_tokens?: number;
+        cache_creation_tokens?: number;
       }
     | undefined;
 
@@ -173,6 +174,7 @@ function SpanContent({ span }: { span: ParsedSpan }) {
           outputTokens={tokenUsage.output_tokens ?? 0}
           reasoningTokens={tokenUsage.reasoning_tokens}
           cacheReadTokens={tokenUsage.cache_read_tokens}
+          cacheCreationTokens={tokenUsage.cache_creation_tokens}
         />
       )}
 

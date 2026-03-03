@@ -57,13 +57,15 @@ def _extract_response(response: Any) -> tuple[Any, dict[str, int], str]:
             "input_tokens": response.usage.input_tokens or 0,
             "output_tokens": response.usage.output_tokens or 0,
         }
-        # Anthropic cache tokens
+        # Anthropic cache tokens — merge into input_tokens for total volume
         cache_read = getattr(response.usage, "cache_read_input_tokens", None)
         cache_creation = getattr(response.usage, "cache_creation_input_tokens", None)
         if cache_read:
-            usage["cache_read_input_tokens"] = cache_read
+            usage["cache_read_tokens"] = cache_read
+            usage["input_tokens"] += cache_read
         if cache_creation:
-            usage["cache_creation_input_tokens"] = cache_creation
+            usage["cache_creation_tokens"] = cache_creation
+            usage["input_tokens"] += cache_creation
 
     model = response.model or ""
     return output, usage, model
@@ -108,6 +110,16 @@ def _aggregate_stream_events(events: list[Any]) -> tuple[Any, dict[str, int], st
                 msg_usage = getattr(msg, "usage", None)
                 if msg_usage:
                     usage["input_tokens"] = getattr(msg_usage, "input_tokens", 0) or 0
+                    cache_read = getattr(msg_usage, "cache_read_input_tokens", None)
+                    cache_creation = getattr(
+                        msg_usage, "cache_creation_input_tokens", None
+                    )
+                    if cache_read:
+                        usage["cache_read_tokens"] = cache_read
+                        usage["input_tokens"] += cache_read
+                    if cache_creation:
+                        usage["cache_creation_tokens"] = cache_creation
+                        usage["input_tokens"] += cache_creation
 
         elif event_type == "content_block_start":
             block = getattr(event, "content_block", None)

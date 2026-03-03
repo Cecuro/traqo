@@ -152,6 +152,8 @@ class Tracer:
         self._stats_errors = 0
         self._stats_input_tokens = 0
         self._stats_output_tokens = 0
+        self._stats_cache_read_tokens = 0
+        self._stats_cache_creation_tokens = 0
         self._children: list[dict[str, Any]] = []
 
         # Child tracer linkage (set by child())
@@ -297,6 +299,10 @@ class Tracer:
             with self._lock:
                 self._stats_input_tokens += token_usage.get("input_tokens", 0)
                 self._stats_output_tokens += token_usage.get("output_tokens", 0)
+                self._stats_cache_read_tokens += token_usage.get("cache_read_tokens", 0)
+                self._stats_cache_creation_tokens += token_usage.get(
+                    "cache_creation_tokens", 0
+                )
 
     def __enter__(self) -> Tracer:
         self._open()
@@ -340,6 +346,8 @@ class Tracer:
                 "events": self._stats_events,
                 "total_input_tokens": self._stats_input_tokens,
                 "total_output_tokens": self._stats_output_tokens,
+                "total_cache_read_tokens": self._stats_cache_read_tokens,
+                "total_cache_creation_tokens": self._stats_cache_creation_tokens,
                 "errors": self._stats_errors,
             },
         }
@@ -563,6 +571,8 @@ class Tracer:
             self._stats_spans += child._stats_spans
             self._stats_input_tokens += child._stats_input_tokens
             self._stats_output_tokens += child._stats_output_tokens
+            self._stats_cache_read_tokens += child._stats_cache_read_tokens
+            self._stats_cache_creation_tokens += child._stats_cache_creation_tokens
             self._stats_errors += child._stats_errors
             self._stats_events += 1
         self._write(
