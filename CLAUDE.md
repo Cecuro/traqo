@@ -47,7 +47,7 @@ The built output (`traqo/ui/static/`) is gitignored — it's generated in CI by 
 
 ## Releasing
 
-1. Bump version in **both** `pyproject.toml` and `traqo/_version.py` (they must match).
+1. Bump version in **both** `pyproject.toml` and `traqo/_version.py` (they must match). Verify with: `grep version pyproject.toml && python -c "from traqo._version import __version__; print(__version__)"`.
 2. Verify `skills/traqo-tracing/SKILL.md` reflects current features (event types, integrations, CLI commands, UI).
 3. Commit the version bump (`chore: bump version to X.Y.Z`).
 4. Push to `main`.
@@ -83,7 +83,7 @@ Parent-child span nesting is tracked via a `ContextVar` span stack (`_span_stack
 
 ### Token tracking convention
 
-Spans store `metadata["token_usage"] = {"input_tokens": N, "output_tokens": N}`. The tracer's `_accumulate_tokens()` sums these into `_stats_input_tokens`/`_stats_output_tokens`, reported in `trace_end.stats`.
+Spans store `metadata["token_usage"] = {"input_tokens": N, "output_tokens": N, "cache_read_tokens": N, "cache_creation_tokens": N}`. `input_tokens` is the total including cached. Cache keys are optional. The tracer's `_accumulate_tokens()` sums all four into `trace_end.stats`. All integrations (Anthropic, OpenAI, LangChain, cc-sync) use these same key names.
 
 ### Storage backends
 
