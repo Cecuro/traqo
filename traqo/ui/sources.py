@@ -69,9 +69,17 @@ class TraceSource(Protocol):
 
 
 def _open_jsonl(path: Path):
-    """Open a JSONL file, transparently handling .gz compression."""
+    """Open a JSONL file, transparently handling .gz compression.
+
+    Checks magic bytes rather than just the extension, because GCS
+    transparent decompression may serve already-decompressed content
+    for files uploaded with ``Content-Encoding: gzip``.
+    """
     if path.name.endswith(".gz"):
-        return gzip.open(path, "rt", encoding="utf-8")
+        with open(path, "rb") as f:
+            magic = f.read(2)
+        if magic == b"\x1f\x8b":  # gzip magic bytes
+            return gzip.open(path, "rt", encoding="utf-8")
     return open(path, encoding="utf-8")
 
 
@@ -128,6 +136,18 @@ def _is_trace_file(name: str) -> bool:
     if name.endswith(".content.jsonl.zst"):
         return False
     return name.endswith(".jsonl") or name.endswith(".jsonl.gz")
+
+
+def _trace_stem(key: str) -> str:
+    """Normalize a trace key to its stem for dedup.
+
+    ``"foo.jsonl.gz"`` and ``"foo.jsonl"`` both return ``"foo"``.
+    """
+    if key.endswith(".jsonl.gz"):
+        return key[: -len(".jsonl.gz")]
+    if key.endswith(".jsonl"):
+        return key[: -len(".jsonl")]
+    return key
 
 
 def _enrich_summary(
@@ -254,7 +274,10 @@ class S3Source:
 
     def list_traces(self) -> list[TraceSummary]:
         summaries: list[TraceSummary] = []
+        seen_stems: set[str] = set()
         paginator = self._client.get_paginator("list_objects_v2")
+        # Collect all trace entries first, then dedup
+        all_entries: list[tuple[str, float]] = []
         for page in paginator.paginate(Bucket=self._bucket, Prefix=self._prefix):
             for obj in page.get("Contents", []):
                 obj_key: str = obj["Key"]
@@ -263,21 +286,29 @@ class S3Source:
                     continue
                 mtime = obj["LastModified"].timestamp()
                 self._cloud_mtimes[rel] = mtime
+                all_entries.append((rel, mtime))
 
-                summary = TraceSummary(key=rel, file=rel, last_modified=mtime)
+        # Sort so .jsonl.gz comes before .jsonl for same stem (prefer compressed)
+        all_entries.sort(key=lambda e: (not e[0].endswith(".jsonl.gz"), e[0]))
 
-                # Enrich from cache if available
-                cached = self._cache_dir / rel
-                if cached.is_file():
-                    try:
-                        first, last = _read_first_last_lines(cached)
-                        _enrich_summary(summary, first, last)
-                    except Exception:
-                        pass
+        for rel, mtime in all_entries:
+            stem = _trace_stem(rel)
+            if stem in seen_stems:
+                continue
+            seen_stems.add(stem)
 
-                summaries.append(summary)
+            summary = TraceSummary(key=rel, file=rel, last_modified=mtime)
 
-        # Sort by last_modified descending
+            cached = self._cache_dir / rel
+            if cached.is_file():
+                try:
+                    first, last = _read_first_last_lines(cached)
+                    _enrich_summary(summary, first, last)
+                except Exception:
+                    pass
+
+            summaries.append(summary)
+
         summaries.sort(key=lambda s: s.last_modified or 0, reverse=True)
         logger.info(
             "listed %d traces from s3://%s/%s",
@@ -365,6 +396,9 @@ class GCSSource:
 
     def list_traces(self) -> list[TraceSummary]:
         summaries: list[TraceSummary] = []
+        seen_stems: set[str] = set()
+        # Collect all trace entries first, then dedup
+        all_entries: list[tuple[str, float]] = []
         blobs = self._bucket.list_blobs(prefix=self._prefix or None)
         for blob in blobs:
             name: str = blob.name
@@ -373,6 +407,16 @@ class GCSSource:
                 continue
             mtime = blob.updated.timestamp() if blob.updated else 0.0
             self._cloud_mtimes[rel] = mtime
+            all_entries.append((rel, mtime))
+
+        # Sort so .jsonl.gz comes before .jsonl for same stem (prefer compressed)
+        all_entries.sort(key=lambda e: (not e[0].endswith(".jsonl.gz"), e[0]))
+
+        for rel, mtime in all_entries:
+            stem = _trace_stem(rel)
+            if stem in seen_stems:
+                continue
+            seen_stems.add(stem)
 
             summary = TraceSummary(key=rel, file=rel, last_modified=mtime)
 

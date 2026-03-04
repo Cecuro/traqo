@@ -70,8 +70,7 @@ class S3Backend:
         name = trace_path.name
         extra_args: dict[str, Any] = {}
         if name.endswith(".jsonl.gz"):
-            extra_args["ContentEncoding"] = "gzip"
-            extra_args["ContentType"] = "application/x-ndjson"
+            extra_args["ContentType"] = "application/gzip"
         elif name.endswith(".content.jsonl.zst"):
             extra_args["ContentType"] = "application/zstd"
         else:

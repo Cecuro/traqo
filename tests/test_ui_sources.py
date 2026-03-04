@@ -613,3 +613,147 @@ class TestParseSource:
     def test_relative_local_path(self):
         source = parse_source(".")
         assert isinstance(source, LocalSource)
+
+
+# ---------------------------------------------------------------------------
+# _open_jsonl magic-bytes check
+# ---------------------------------------------------------------------------
+
+
+class TestOpenJsonl:
+    """Test that _open_jsonl checks gzip magic bytes, not just extension."""
+
+    def test_gz_extension_with_gzip_content(self, tmp_path: Path):
+        """A real .gz file should be opened with gzip."""
+        import gzip as gzip_mod
+
+        from traqo.ui.sources import _open_jsonl
+
+        path = tmp_path / "trace.jsonl.gz"
+        with gzip_mod.open(path, "wt", encoding="utf-8") as f:
+            f.write('{"type": "trace_start"}\n')
+
+        with _open_jsonl(path) as f:
+            line = f.readline().strip()
+        assert '"trace_start"' in line
+
+    def test_gz_extension_with_plain_content(self, tmp_path: Path):
+        """A .gz file that's actually plain text (GCS transparent decompression)."""
+        from traqo.ui.sources import _open_jsonl
+
+        path = tmp_path / "trace.jsonl.gz"
+        path.write_text('{"type": "trace_start"}\n')
+
+        with _open_jsonl(path) as f:
+            line = f.readline().strip()
+        assert '"trace_start"' in line
+
+    def test_plain_jsonl(self, tmp_path: Path):
+        """A regular .jsonl file."""
+        from traqo.ui.sources import _open_jsonl
+
+        path = tmp_path / "trace.jsonl"
+        path.write_text('{"type": "trace_start"}\n')
+
+        with _open_jsonl(path) as f:
+            line = f.readline().strip()
+        assert '"trace_start"' in line
+
+
+# ---------------------------------------------------------------------------
+# _trace_stem and dedup helpers
+# ---------------------------------------------------------------------------
+
+
+class TestTraceStem:
+    def test_jsonl_gz(self):
+        from traqo.ui.sources import _trace_stem
+
+        assert _trace_stem("foo.jsonl.gz") == "foo"
+
+    def test_jsonl(self):
+        from traqo.ui.sources import _trace_stem
+
+        assert _trace_stem("foo.jsonl") == "foo"
+
+    def test_nested_path(self):
+        from traqo.ui.sources import _trace_stem
+
+        assert _trace_stem("sub/dir/trace.jsonl.gz") == "sub/dir/trace"
+
+    def test_other_extension(self):
+        from traqo.ui.sources import _trace_stem
+
+        assert _trace_stem("file.txt") == "file.txt"
+
+
+class TestLocalSourceDedup:
+    """LocalSource should deduplicate .jsonl and .jsonl.gz with same stem."""
+
+    def test_prefers_gz_over_raw(self, tmp_path: Path):
+        import gzip as gzip_mod
+
+        events = _make_trace_events()
+
+        # Write both raw and compressed
+        raw = tmp_path / "trace.jsonl"
+        _write_trace(raw, events)
+        gz = tmp_path / "trace.jsonl.gz"
+        with gzip_mod.open(gz, "wt", encoding="utf-8") as f:
+            for ev in events:
+                f.write(json.dumps(ev) + "\n")
+
+        source = LocalSource(tmp_path)
+        traces = source.list_traces()
+
+        assert len(traces) == 1
+        assert traces[0].key.endswith(".jsonl.gz")
+
+    def test_excludes_content_files(self, tmp_path: Path):
+        events = _make_trace_events()
+        _write_trace(tmp_path / "trace.jsonl", events)
+        # Create a content sidecar — should not appear in listing
+        (tmp_path / "trace.content.jsonl.zst").write_bytes(b"fake")
+
+        source = LocalSource(tmp_path)
+        traces = source.list_traces()
+
+        assert len(traces) == 1
+        assert not any("content" in t.key for t in traces)
+
+
+class TestLocalSourceReadContent:
+    """LocalSource.read_content should find externalized span inputs."""
+
+    def test_read_content_roundtrip(self, tmp_path: Path):
+        from traqo.compress import split_and_compress
+
+        large_input = {"messages": [{"content": "x" * 20000}]}
+        events = [
+            {"type": "trace_start", "ts": "t"},
+            {
+                "type": "span_start",
+                "id": "s1",
+                "name": "test",
+                "kind": "llm",
+                "ts": "t",
+                "input": large_input,
+            },
+            {"type": "span_end", "id": "s1", "name": "test", "status": "ok"},
+            {"type": "trace_end", "ts": "t"},
+        ]
+        _write_trace(tmp_path / "trace.jsonl", events)
+        main_path, content_path = split_and_compress(tmp_path / "trace.jsonl")
+        assert content_path is not None
+
+        source = LocalSource(tmp_path)
+        result = source.read_content(main_path.name, "s1")
+        assert result == large_input
+
+    def test_read_content_returns_none_for_no_content_file(self, tmp_path: Path):
+        events = _make_trace_events()
+        _write_trace(tmp_path / "trace.jsonl", events)
+
+        source = LocalSource(tmp_path)
+        result = source.read_content("trace.jsonl", "nonexistent")
+        assert result is None
