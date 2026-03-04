@@ -199,6 +199,10 @@ class TestUpdateCurrentSpan:
 
 
 class TestOpenAITTFT:
+    @pytest.fixture(autouse=True)
+    def _skip_no_openai(self):
+        pytest.importorskip("openai")
+
     def test_sync_stream_ttft(self, trace_file: Path):
         """_StreamWrapper should record time_to_first_token_s."""
         from traqo.integrations.openai import _StreamWrapper
@@ -285,6 +289,10 @@ class TestAnthropicTTFT:
 
 
 class TestOpenAIModelParams:
+    @pytest.fixture(autouse=True)
+    def _skip_no_openai(self):
+        pytest.importorskip("openai")
+
     def test_model_params_extracted(self, trace_file: Path):
         """Model parameters should appear in span metadata."""
         from traqo.integrations.openai import _CHAT_MODEL_PARAMS, _extract_model_params
@@ -328,6 +336,10 @@ class TestAnthropicModelParams:
 
 
 class TestOpenAIEmbeddings:
+    @pytest.fixture(autouse=True)
+    def _skip_no_openai(self):
+        pytest.importorskip("openai")
+
     def test_embeddings_no_tracer(self):
         """Without active tracer, should pass through."""
         from traqo.integrations.openai import _TracedEmbeddings
@@ -377,6 +389,10 @@ class TestOpenAIEmbeddings:
 
 
 class TestOpenAIResponses:
+    @pytest.fixture(autouse=True)
+    def _skip_no_openai(self):
+        pytest.importorskip("openai")
+
     def test_responses_no_tracer(self):
         """Without active tracer, should pass through."""
         from traqo.integrations.openai import _TracedResponses
@@ -506,6 +522,10 @@ class TestOpenAIResponses:
 
 
 class TestTracedOpenAIClientProperties:
+    @pytest.fixture(autouse=True)
+    def _skip_no_openai(self):
+        pytest.importorskip("openai")
+
     def test_has_embeddings_property(self):
         from traqo.integrations.openai import _TracedEmbeddings, _TracedOpenAIClient
 
@@ -529,6 +549,10 @@ class TestTracedOpenAIClientProperties:
 
 
 class TestGeminiExtractors:
+    @pytest.fixture(autouse=True)
+    def _skip_no_gemini(self):
+        pytest.importorskip("google.genai")
+
     def test_extract_model_params_from_dict(self):
         from traqo.integrations.gemini import _extract_model_params_from_config
 
@@ -606,6 +630,10 @@ class TestGeminiExtractors:
 
 
 class TestGeminiTracedModels:
+    @pytest.fixture(autouse=True)
+    def _skip_no_gemini(self):
+        pytest.importorskip("google.genai")
+
     def test_generate_content_no_tracer(self):
         from traqo.integrations.gemini import _TracedModels
 
@@ -705,6 +733,10 @@ class TestGeminiTracedModels:
 
 
 class TestGeminiClient:
+    @pytest.fixture(autouse=True)
+    def _skip_no_gemini(self):
+        pytest.importorskip("google.genai")
+
     def test_traced_gemini_proxy_structure(self):
         from traqo.integrations.gemini import _TracedAio, _TracedModels, traced_gemini
 
@@ -728,6 +760,10 @@ class TestGeminiClient:
 
 
 class TestExtractResponsesOutput:
+    @pytest.fixture(autouse=True)
+    def _skip_no_openai(self):
+        pytest.importorskip("openai")
+
     def test_text_only(self):
         from traqo.integrations.openai import _extract_responses_output
 
