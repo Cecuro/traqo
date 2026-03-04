@@ -94,13 +94,15 @@ aws s3 cp s3://bucket/prefix/ /tmp/traces/ --recursive --exclude "*" --include "
 gzcat trace.jsonl.gz | tail -1 | jq .
 
 # Follow child traces (file field matches the .jsonl.gz filename on disk/cloud)
+# Pipelines often split work into child traces (e.g. one per agent or batch item).
+# The parent trace_end lists all children with their file, stats, and duration.
 gzcat trace.jsonl.gz | tail -1 | jq '(.children // [])[] | {name, file, spans, total_input_tokens}'
 ```
 
 ### Token Usage
 ```bash
 # Per-span tokens from metadata (input_tokens includes cached)
-gzcat trace.jsonl.gz | jq 'select(.metadata.token_usage) | .metadata.token_usage'
+gzcat trace.jsonl.gz | jq 'select(.metadata.token_usage) | {name, id, model: .metadata.model, tokens: .metadata.token_usage}'
 
 # Total from summary (includes cache and reasoning breakdown)
 gzcat trace.jsonl.gz | tail -1 | jq '.stats | {total_input_tokens, total_output_tokens, total_cache_read_tokens, total_cache_creation_tokens, total_reasoning_tokens}'
@@ -133,9 +135,14 @@ All integrations (OpenAI, Anthropic, Gemini, LangChain) use consistent metadata 
 
 ### Span Tree
 ```bash
-# Dump span hierarchy (parent_id: null = root span, matching parent_id = siblings)
+# Root spans only (top-level structure)
+gzcat trace.jsonl.gz | jq 'select(.type == "span_start" and .parent_id == null) | {id, name, kind}'
+
+# Full hierarchy (parent_id: null = root span, matching parent_id = siblings)
 gzcat trace.jsonl.gz | jq 'select(.type == "span_start") | {id, parent_id, name, kind}'
 ```
+
+For visual tree exploration with waterfall timing, use `traqo ui ./traces/` instead of shell commands.
 
 ### Python reader API
 ```python
