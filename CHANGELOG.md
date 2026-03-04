@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.0 (2026-03-04)
+
+### Added
+- **Compressed split-file trace storage** — traces are split at upload time into a main file (`.jsonl.gz`, ~400 KB) and an optional content file (`.content.jsonl.zst`) for large span inputs (>10 KB). Reduces storage from ~24 GiB to ~0.5 GiB per audit run (54x compression).
+- **Streaming content loading** — `read_content()` uses streaming zstd decompression (~1 MB peak memory) to fetch externalized span inputs on demand.
+- **UI lazy content loading** — "Load full input" button for externalized span inputs, fetched via new `/api/content` endpoint.
+- **`zstandard` dependency** — now a required runtime dependency for trace compression.
+
+### Changed
+- S3 and GCS backends now set `Content-Type` and `Content-Encoding` headers based on file extension.
+- UI sources handle `.jsonl.gz` files transparently alongside raw `.jsonl`.
+
 ## 0.6.0 (2026-03-03)
 
 ### Added
