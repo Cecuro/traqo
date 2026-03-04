@@ -249,3 +249,69 @@ export function kindBadgeClass(kind: string): string {
   if (kind === "tool") return "bg-purple/12 text-purple";
   return "bg-yellow/12 text-yellow";
 }
+
+// ── Error navigation helpers ──────────────────────────────
+
+export interface ErrorSpanRef {
+  spanId: string;
+  name: string;
+  errorType?: string;
+  errorMessage?: string;
+}
+
+/** Collect all error spans from a parsed trace (including expanded child tracers). */
+export function collectErrorSpans(parsed: ParsedTrace): ErrorSpanRef[] {
+  const errors: ErrorSpanRef[] = [];
+  const sorted = [...parsed.spans].sort((a, b) =>
+    (a.ts_start ?? "") < (b.ts_start ?? "") ? -1 : 1,
+  );
+  for (const span of sorted) {
+    if (span.status === "error") {
+      errors.push({
+        spanId: span.id,
+        name: span.name,
+        errorType: span.error?.type,
+        errorMessage: span.error?.message,
+      });
+    }
+  }
+  for (const [childName, child] of parsed.childTracers) {
+    if (!child.parsed) continue;
+    const childSorted = [...child.parsed.spans].sort((a, b) =>
+      (a.ts_start ?? "") < (b.ts_start ?? "") ? -1 : 1,
+    );
+    for (const span of childSorted) {
+      if (span.status === "error") {
+        errors.push({
+          spanId: `child:${childName}:${span.id}`,
+          name: span.name,
+          errorType: span.error?.type,
+          errorMessage: span.error?.message,
+        });
+      }
+    }
+  }
+  return errors;
+}
+
+/**
+ * Returns a Set of span IDs that have at least one error descendant.
+ * Walks up from every error span to the root, marking each ancestor.
+ */
+export function buildErrorAncestorSet(spans: ParsedSpan[]): Set<string> {
+  const parentMap = new Map<string, string>();
+  for (const s of spans) {
+    if (s.parent_id) parentMap.set(s.id, s.parent_id);
+  }
+  const ancestors = new Set<string>();
+  for (const s of spans) {
+    if (s.status !== "error") continue;
+    let current = s.parent_id;
+    while (current) {
+      if (ancestors.has(current)) break;
+      ancestors.add(current);
+      current = parentMap.get(current);
+    }
+  }
+  return ancestors;
+}

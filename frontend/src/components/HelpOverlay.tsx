@@ -88,6 +88,7 @@ export function HelpOverlay({ onClose }: Props) {
             Navigate spans in trace view
           </ShortcutRow>
           <ShortcutRow keyText="r">Refresh trace list</ShortcutRow>
+          <ShortcutRow keyText="e / E">Next / previous error</ShortcutRow>
         </Section>
 
         <Section title="Tips">

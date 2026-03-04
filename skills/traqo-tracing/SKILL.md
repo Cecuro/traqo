@@ -194,6 +194,23 @@ from traqo.integrations.langchain import traced_model
 model = traced_model(ChatOpenAI(), operation="summarize")
 ```
 
+### Trace a Claude Agent SDK session
+```python
+from claude_agent_sdk import query, ClaudeAgentOptions
+from traqo.integrations.claude_agent_sdk import traqo_agent
+
+# Standalone
+async with traqo_agent("code-review", output_dir="./traces", tags=["review"]) as hooks:
+    async for msg in query(prompt="Review this PR", options=ClaudeAgentOptions(hooks=hooks)):
+        print(msg)
+
+# Nested inside a parent pipeline trace
+with Tracer(Path("traces/pipeline.jsonl"), tags=["ci"]) as tracer:
+    async with traqo_agent("code-review", tags=["review"]) as hooks:
+        async for msg in query(prompt="Review", options=ClaudeAgentOptions(hooks=hooks)):
+            ...
+```
+
 ### Use spans with metadata
 ```python
 from traqo import get_tracer

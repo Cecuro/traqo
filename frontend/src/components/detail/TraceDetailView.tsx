@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useTrace } from "../../hooks/useTrace";
 import { useKeyboard } from "../../hooks/useKeyboard";
 import { useTraceDetailState, useTraceDetailDispatch, useTheme } from "../../context";
+import { collectErrorSpans } from "../../utils";
 import { LoadingOverlay } from "../LoadingOverlay";
 import { SummaryBar } from "./SummaryBar";
 import { SpanTree } from "./SpanTree";
@@ -96,6 +97,47 @@ export function TraceDetailView() {
     [selectedSpanId, handleSelectSpan],
   );
 
+  // Error navigation
+  const errorSpans = useMemo(
+    () => (parsedTrace ? collectErrorSpans(parsedTrace) : []),
+    [parsedTrace],
+  );
+
+  const currentErrorIndex = useMemo(() => {
+    if (!selectedSpanId) return -1;
+    return errorSpans.findIndex((e) => e.spanId === selectedSpanId);
+  }, [selectedSpanId, errorSpans]);
+
+  const handleSelectError = useCallback(
+    (spanId: string) => {
+      handleSelectSpan(spanId);
+      requestAnimationFrame(() => {
+        if (!treeRef.current) return;
+        const el = treeRef.current.querySelector(`[data-span-id="${CSS.escape(spanId)}"]`);
+        el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      });
+    },
+    [handleSelectSpan],
+  );
+
+  const handleNextError = useCallback(() => {
+    if (errorSpans.length === 0) return;
+    const nextIndex = currentErrorIndex < errorSpans.length - 1
+      ? currentErrorIndex + 1
+      : 0;
+    const target = errorSpans[nextIndex];
+    if (target) handleSelectError(target.spanId);
+  }, [errorSpans, currentErrorIndex, handleSelectError]);
+
+  const handlePrevError = useCallback(() => {
+    if (errorSpans.length === 0) return;
+    const prevIndex = currentErrorIndex > 0
+      ? currentErrorIndex - 1
+      : errorSpans.length - 1;
+    const target = errorSpans[prevIndex];
+    if (target) handleSelectError(target.spanId);
+  }, [errorSpans, currentErrorIndex, handleSelectError]);
+
   useKeyboard(
     useMemo(
       () => ({
@@ -103,8 +145,10 @@ export function TraceDetailView() {
         onUp: () => navigateSpans("up"),
         onDown: () => navigateSpans("down"),
         onToggleTheme: toggleTheme,
+        onNextError: handleNextError,
+        onPrevError: handlePrevError,
       }),
-      [navigate, dir, navigateSpans, toggleTheme],
+      [navigate, dir, navigateSpans, toggleTheme, handleNextError, handlePrevError],
     ),
   );
 
@@ -118,7 +162,15 @@ export function TraceDetailView() {
 
   return (
     <div className="flex flex-col h-full">
-      <SummaryBar parsedTrace={parsedTrace} dir={dir} />
+      <SummaryBar
+        parsedTrace={parsedTrace}
+        dir={dir}
+        errorSpans={errorSpans}
+        onSelectError={handleSelectError}
+        onNextError={handleNextError}
+        onPrevError={handlePrevError}
+        currentErrorIndex={currentErrorIndex}
+      />
       <div className="flex flex-1 overflow-hidden max-[900px]:flex-col">
         <div
           ref={treeRef}

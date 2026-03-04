@@ -1,7 +1,7 @@
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ChildTracer, ParsedTrace } from "../../types";
-import { fmtDur, fmtN } from "../../utils";
+import { fmtDur, fmtN, buildErrorAncestorSet } from "../../utils";
 import { SpanNode } from "./SpanNode";
 
 interface Props {
@@ -27,6 +27,10 @@ export function ChildTraceNode({
 }: Props) {
   const navigate = useNavigate();
   const chevron = child.expanded ? "\u25BC" : "\u25B6";
+  const childHasErrors = useMemo(
+    () => child.parsed?.spans.some((s) => s.status === "error") ?? false,
+    [child.parsed],
+  );
 
   const statsHtml = child.stats ? (
     <span className="font-mono text-[11px] text-text-muted whitespace-nowrap truncate">
@@ -67,6 +71,9 @@ export function ChildTraceNode({
             child
           </span>
           <span className="text-[13px] font-medium truncate">{child.name}</span>
+          {childHasErrors && (
+            <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-err" title="Contains errors" />
+          )}
           {statsHtml}
         </div>
         <div className="flex items-center gap-2.5 shrink-0">
@@ -158,6 +165,8 @@ function ChildSpanTree({
   for (const c of childrenMap.values()) c.sort(sortFn);
   roots.sort(sortFn);
 
+  const errorAncestors = useMemo(() => buildErrorAncestorSet(spans), [spans]);
+
   // Interleave root spans and grandchild tracers by timestamp
   type Item =
     | { type: "span"; span: (typeof spans)[0]; ts: string }
@@ -185,6 +194,7 @@ function ChildSpanTree({
           qualifiedId={qid}
           selected={selectedSpanId === qid}
           onSelect={onSelect}
+          hasErrorDescendant={errorAncestors.has(span.id)}
         />
         {(childrenMap.get(span.id) ?? []).map((ch) =>
           renderSubtree(ch, d + 1),

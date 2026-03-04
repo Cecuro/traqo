@@ -9,6 +9,7 @@ interface Props {
   qualifiedId?: string;
   selected: boolean;
   onSelect: (id: string) => void;
+  hasErrorDescendant?: boolean;
 }
 
 function extractToolNames(span: ParsedSpan): string[] {
@@ -27,6 +28,7 @@ export function SpanNode({
   qualifiedId,
   selected,
   onSelect,
+  hasErrorDescendant,
 }: Props) {
   const s0 = span.ts_start ? new Date(span.ts_start).getTime() : t0;
   const s1 = span.ts_end ? new Date(span.ts_end).getTime() : s0;
@@ -68,6 +70,9 @@ export function SpanNode({
           </span>
         )}
         <span className="text-[13px] font-medium truncate">{span.name}</span>
+        {!isErr && hasErrorDescendant && (
+          <span className="text-[10px] text-err/60 shrink-0" title="Has error descendants">!</span>
+        )}
         {toolNames.length > 0 && (
           <span className="text-[11px] text-text-dim truncate shrink-0">
             {toolNames.join(", ")}

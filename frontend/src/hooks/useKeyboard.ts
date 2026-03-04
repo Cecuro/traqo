@@ -7,6 +7,8 @@ interface KeyboardOptions {
   onUp?: () => void;
   onDown?: () => void;
   onToggleTheme?: () => void;
+  onNextError?: () => void;
+  onPrevError?: () => void;
 }
 
 export function useKeyboard(opts: KeyboardOptions) {
@@ -32,6 +34,16 @@ export function useKeyboard(opts: KeyboardOptions) {
       if (e.key === "t") {
         e.preventDefault();
         opts.onToggleTheme?.();
+        return;
+      }
+      if (e.key === "e") {
+        e.preventDefault();
+        opts.onNextError?.();
+        return;
+      }
+      if (e.key === "E") {
+        e.preventDefault();
+        opts.onPrevError?.();
         return;
       }
       if (e.key === "ArrowUp") {

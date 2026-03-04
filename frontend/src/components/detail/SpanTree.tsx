@@ -1,6 +1,6 @@
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import type { ParsedTrace, ParsedSpan, ChildTracer } from "../../types";
-import { fmtDur } from "../../utils";
+import { fmtDur, buildErrorAncestorSet } from "../../utils";
 import { fetchTrace } from "../../api";
 import { parseEvents } from "../../utils";
 import { useTraceDetailDispatch } from "../../context";
@@ -40,6 +40,8 @@ export function SpanTree({ parsedTrace, selectedSpanId, onSelect }: Props) {
     (a.ts_start ?? "") < (b.ts_start ?? "") ? -1 : 1;
   for (const c of children.values()) c.sort(sortFn);
   roots.sort(sortFn);
+
+  const errorAncestors = useMemo(() => buildErrorAncestorSet(spans), [spans]);
 
   const handleToggleChild = useCallback(
     (childName: string) => {
@@ -126,6 +128,7 @@ export function SpanTree({ parsedTrace, selectedSpanId, onSelect }: Props) {
           dur={dur}
           selected={selectedSpanId === span.id}
           onSelect={onSelect}
+          hasErrorDescendant={errorAncestors.has(span.id)}
         />
         {(children.get(span.id) ?? []).map((ch) =>
           renderSubtree(ch, depth + 1),

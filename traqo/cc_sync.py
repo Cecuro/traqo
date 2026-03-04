@@ -314,8 +314,21 @@ def _extract_tool_uses(content_blocks: list[dict[str, Any]]) -> list[dict[str, A
     return [b for b in content_blocks if b.get("type") == "tool_use"]
 
 
-def generate_trace_events(session: ParsedSession) -> list[dict[str, Any]]:
-    """Convert a ParsedSession into a list of traqo trace events."""
+def generate_trace_events(
+    session: ParsedSession,
+    *,
+    name: str | None = None,
+    thread_id: str | None = None,
+    tags: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Convert a ParsedSession into a list of traqo trace events.
+
+    Args:
+        session: Parsed Claude Code session.
+        name: Override the trace name (default: derived from session slug).
+        thread_id: Override the thread_id (default: session_id).
+        tags: Override the tags list (default: ["claude-code"]).
+    """
     events: list[dict[str, Any]] = []
     total_input_tokens = 0
     total_output_tokens = 0
@@ -325,11 +338,12 @@ def generate_trace_events(session: ParsedSession) -> list[dict[str, Any]]:
     error_count = 0
 
     # Derive trace name
-    trace_name = (
-        f"Claude Code: {session.slug}"
-        if session.slug
-        else f"Claude Code: {session.session_id[:8]}"
-    )
+    if name is not None:
+        trace_name = name
+    elif session.slug:
+        trace_name = f"Claude Code: {session.slug}"
+    else:
+        trace_name = f"Claude Code: {session.session_id[:8]}"
 
     # trace_start
     metadata: dict[str, Any] = {
@@ -353,8 +367,8 @@ def generate_trace_events(session: ParsedSession) -> list[dict[str, Any]]:
             "ts": session.first_timestamp,
             "tracer_version": __version__,
             "name": trace_name,
-            "thread_id": session.session_id,
-            "tags": ["claude-code"],
+            "thread_id": thread_id if thread_id is not None else session.session_id,
+            "tags": tags if tags is not None else ["claude-code"],
             "metadata": metadata,
             **({"input": first_prompt} if first_prompt else {}),
         }
@@ -771,8 +785,21 @@ def sync_session(
     output_dir: Path,
     *,
     session_id: str | None = None,
+    name: str | None = None,
+    thread_id: str | None = None,
+    tags: list[str] | None = None,
+    force: bool = False,
 ) -> Path | None:
     """Sync a single Claude Code session transcript to traqo format.
+
+    Args:
+        transcript_path: Path to the Claude Code JSONL transcript.
+        output_dir: Directory to write the traqo trace file.
+        session_id: Override session ID (default: transcript filename stem).
+        name: Override the trace name.
+        thread_id: Override the thread_id in trace_start.
+        tags: Override the tags list in trace_start.
+        force: Skip the state check and always rewrite.
 
     Returns the output path if written, or None if no new data.
     """
@@ -787,10 +814,11 @@ def sync_session(
         session_id = transcript_path.stem
 
     # Check state
-    state = _load_state(output_dir, session_id)
-    if state.get("file_size") == file_size:
-        logger.debug("no new data for session %s, skipping", session_id)
-        return None
+    if not force:
+        state = _load_state(output_dir, session_id)
+        if state.get("file_size") == file_size:
+            logger.debug("no new data for session %s, skipping", session_id)
+            return None
 
     # Parse and convert
     session = parse_transcript(transcript_path)
@@ -798,7 +826,7 @@ def sync_session(
         logger.debug("no turns found in %s, skipping", transcript_path)
         return None
 
-    events = generate_trace_events(session)
+    events = generate_trace_events(session, name=name, thread_id=thread_id, tags=tags)
 
     # Write output
     output_dir.mkdir(parents=True, exist_ok=True)

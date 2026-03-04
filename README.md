@@ -145,6 +145,36 @@ grep '"status":"error"' traces/**/*.jsonl
 grep '"token_usage"' traces/**/*.jsonl | jq '.metadata.token_usage'
 ```
 
+## Claude Agent SDK Integration
+
+Trace [Claude Agent SDK](https://github.com/anthropics/claude-code/tree/main/packages/claude-agent-sdk) sessions with an async context manager. The Stop hook converts the session transcript into a traqo trace automatically.
+
+```python
+from claude_agent_sdk import query, ClaudeAgentOptions
+from traqo.integrations.claude_agent_sdk import traqo_agent
+
+async with traqo_agent("code-review", output_dir="./traces", tags=["review"]) as hooks:
+    async for msg in query(
+        prompt="Review this PR for security issues",
+        options=ClaudeAgentOptions(hooks=hooks),
+    ):
+        print(msg)
+```
+
+Nest multiple agents inside a parent trace for pipeline orchestration:
+
+```python
+with Tracer(Path("traces/pipeline.jsonl"), tags=["ci"]) as tracer:
+    async with traqo_agent("code-review", tags=["review"]) as hooks:
+        async for msg in query(prompt="Review", options=ClaudeAgentOptions(hooks=hooks)):
+            ...
+    async with traqo_agent("test-gen", tags=["testing"]) as hooks:
+        async for msg in query(prompt="Generate tests", options=ClaudeAgentOptions(hooks=hooks)):
+            ...
+```
+
+The parent `trace_end` rolls up token usage and span counts from all child agents.
+
 ## Claude Code Integration
 
 Convert Claude Code session transcripts into traqo traces — one trace per session with turns, LLM calls, tool calls, and subagent hierarchy.
