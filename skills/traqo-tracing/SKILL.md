@@ -185,6 +185,9 @@ gzcat trace.jsonl.gz | jq 'select(.type == "span_start") | {id, parent_id, name,
 
 # Span kinds breakdown
 gzcat trace.jsonl.gz | jq -r 'select(.type == "span_end") | .kind' | sort | uniq -c | sort -rn
+
+# Search spans by name pattern (case-insensitive)
+gzcat trace.jsonl.gz | jq 'select(.name // "" | test("pattern"; "i")) | {type, name, kind}'
 ```
 
 **Note:** The first two commands use `jq -s` (slurp) which loads the entire file into memory. For large traces (100K+ spans), use `traqo ui` instead. For visual tree exploration with waterfall timing, prefer `traqo ui ./traces/` over shell commands.
