@@ -27,13 +27,13 @@ Your traces are just `.jsonl` files. Read them with `grep`, query them with Duck
 - **AI-first** -- JSONL is text. AI assistants read your traces directly, no browser needed.
 - **Hierarchical spans** -- not flat logs. Reconstruct the full call tree across functions and files.
 - **Everything is a span** -- LLM calls, DB queries, HTTP requests. All spans with metadata.
-- **Zero dependencies** -- stdlib only. Integrations are optional extras.
+- **Minimal dependencies** -- one runtime dep (`zstandard`). Integrations are optional extras.
 - **Transparent** -- traces are portable files. No vendor lock-in, no proprietary format.
 
 ## Install
 
 ```bash
-pip install traqo                   # Core (zero dependencies)
+pip install traqo                   # Core (requires zstandard)
 pip install traqo[openai]           # + OpenAI integration
 pip install traqo[anthropic]        # + Anthropic integration
 pip install traqo[langchain]        # + LangChain integration
@@ -202,7 +202,7 @@ traqo ui ./traces
 
 ## Trace Viewer UI
 
-Browse and inspect traces in your browser. Zero dependencies — uses Python's built-in HTTP server.
+Browse and inspect traces in your browser. Uses Python's built-in HTTP server.
 
 ```bash
 traqo ui ./traces                  # Serve traces on http://localhost:7600

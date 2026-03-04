@@ -186,6 +186,7 @@ export function TraceDetailView() {
           <SpanDetail
             spanId={selectedSpanId}
             parsedTrace={parsedTrace}
+            fileKey={decodedFile}
           />
         </div>
       </div>

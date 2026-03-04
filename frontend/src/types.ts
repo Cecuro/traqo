@@ -113,3 +113,27 @@ export interface FolderItem {
   totalDuration: number;
   avgDuration: number;
 }
+
+/** Reference stub for externalized span input */
+export interface ContentRef {
+  _ref: string;
+  _size: number;
+}
+
+/** Shape returned by /api/content?file=...&span_id=... */
+export interface ContentResponse {
+  span_id: string;
+  input: unknown;
+  error?: string;
+}
+
+export function isContentRef(value: unknown): value is ContentRef {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "_ref" in value &&
+    "_size" in value &&
+    typeof (value as ContentRef)._ref === "string" &&
+    typeof (value as ContentRef)._size === "number"
+  );
+}

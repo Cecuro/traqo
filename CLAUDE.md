@@ -17,7 +17,7 @@ uv run pyright traqo/                # Type check
 uv run ruff check --fix . && uv run ruff format . && uv run pyright traqo/
 ```
 
-Zero runtime dependencies — only stdlib. Storage backends (S3, GCS) are optional extras.
+One runtime dependency (`zstandard` for trace compression). Storage backends (S3, GCS) are optional extras.
 
 ## Development guidelines
 
@@ -63,11 +63,11 @@ npx skills add Cecuro/traqo --yes --global
 
 ## Architecture
 
-traqo is a structured JSONL tracing library. It writes trace events (one JSON object per line) to local files. No server, no network, no storage costs.
+traqo is a structured JSONL tracing library. It writes trace events (one JSON object per line) to local files, then compresses and splits them at upload time into a main file (`.jsonl.gz`) and an optional content file (`.content.jsonl.zst`) for large span inputs. No server, no network, no storage costs.
 
 ### Core flow
 
-`Tracer` (context manager) → opens a JSONL file → `span()` creates nested spans → each span writes `span_start`/`span_end` events → `Tracer.__exit__` writes `trace_end` with aggregated stats.
+`Tracer` (context manager) → opens a JSONL file → `span()` creates nested spans → each span writes `span_start`/`span_end` events → `Tracer.__exit__` writes `trace_end` with aggregated stats → `_prepare_for_upload()` splits and compresses into `.jsonl.gz` + optional `.content.jsonl.zst` → backends receive compressed paths.
 
 Parent-child span nesting is tracked via a `ContextVar` span stack (`_span_stack` in `tracer.py`). Each span reads the current stack top as its `parent_id`, then pushes itself. This is async-safe — concurrent tasks get isolated stacks.
 
@@ -78,7 +78,8 @@ Parent-child span nesting is tracked via a `ContextVar` span stack (`_span_stack
 - **`serialize.py`** — Single serialization path via `_serialize_value()`. Handles datetime, UUID, Enum, dataclass, Pydantic, numpy, circular refs (sibling-tolerant add/discard), NaN→None. No limits on string length, depth, or collection size. `to_json()` pre-processes through `_serialize_value()` then `json.dumps(allow_nan=False)`. The `json_default` function delegates to `_serialize_value`.
 - **`integrations/`** — OpenAI and Anthropic use a proxy-wrapper pattern (intercept API calls, delegate via `__getattr__`). LangChain has two approaches: `TraqoCallback` (callback handler writing spans directly) and `TracedChatModel` (BaseChatModel subclass wrapping `_generate`).
 - **`backend.py`** — `Backend` protocol (runtime_checkable) with `on_event()`, `on_trace_complete()`, `close()`. Shared `ThreadPoolExecutor` for background uploads. `flush_backends()` waits + recreates pool (for servers). `shutdown_backends()` waits + tears down (for atexit). An atexit handler is registered on first `submit_background()` call.
-- **`backends/`** — `S3Backend` (requires `traqo[s3]`), `GCSBackend` (requires `traqo[gcs]`), `LocalBackend` (stdlib only, copies to target dir with collision-safe filenames). All are batch-upload backends: `on_event()` is a no-op, upload happens in `on_trace_complete()`.
+- **`compress.py`** — `split_and_compress()` splits raw JSONL into gzip-compressed main file + zstd-compressed content file for large span inputs (>10 KB). `read_content()` does streaming decompression to find a specific span's input (~1 MB peak memory).
+- **`backends/`** — `S3Backend` (requires `traqo[s3]`), `GCSBackend` (requires `traqo[gcs]`), `LocalBackend` (copies to target dir with collision-safe filenames). All are batch-upload backends: `on_event()` is a no-op, upload happens in `on_trace_complete()`. Backends set appropriate `Content-Type`/`Content-Encoding` headers based on file extension.
 - **`ui/server.py`** — Built-in HTTP server for the trace viewer. Serves the React SPA from `ui/static/` (built from `frontend/`) and provides `/api/traces` and `/api/trace` endpoints. Supports local dirs, S3, and GCS sources.
 
 ### Token tracking convention

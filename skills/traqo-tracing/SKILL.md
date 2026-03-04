@@ -2,10 +2,10 @@
 name: traqo-tracing
 description: >-
   Read, analyze, and visualize traqo JSONL traces for application observability.
-  Use when: (1) reading or debugging .jsonl trace files, (2) investigating
+  Use when: (1) reading or debugging .jsonl/.jsonl.gz trace files, (2) investigating
   token usage or costs, (3) analyzing pipeline execution flow or errors,
   (4) adding tracing instrumentation to Python code, (5) querying trace data
-  with grep or DuckDB, (6) launching the trace viewer UI. Triggers on phrases
+  with shell commands, (6) launching the trace viewer UI. Triggers on phrases
   like "read the trace", "what happened in the pipeline", "token usage",
   "why did it fail", "add tracing", "trace this function", "check the logs",
   "show me the traces", "open the dashboard", "visualize the run".
@@ -17,7 +17,9 @@ Analyze JSONL traces produced by the `traqo` Python package.
 
 ## Trace File Structure
 
-Last line is always `trace_end` with summary stats. Start there.
+Traces may be stored as raw `.jsonl`, compressed `.jsonl.gz`, or split into `.jsonl.gz` (main) + `.content.jsonl.zst` (externalized large span inputs). Last line is always `trace_end` with summary stats. Start there.
+
+For compressed traces, large `span_start` inputs (>10 KB) are replaced with `{"_ref": "<span_id>", "_size": N}` stubs. The full input lives in the `.content.jsonl.zst` sidecar file.
 
 ## Event Types
 
@@ -49,76 +51,102 @@ Every event has `id` and `parent_id` for tree reconstruction. The `kind` field c
 {"type":"trace_end","ts":"2026-02-20T10:05:00Z","duration_s":300.0,"output":{"response":"..."},"stats":{"spans":15,"events":5,"total_input_tokens":45000,"total_output_tokens":12000,"total_cache_read_tokens":30000,"total_cache_creation_tokens":5000,"errors":0},"children":[{"name":"agent_a","path":"traces/agent_a.jsonl","duration_s":45.2,"spans":3,"total_input_tokens":5000,"total_output_tokens":2000}]}
 ```
 
-## Common Queries
+## Reading Traces
+
+### File formats
+
+Traces on disk may be raw `.jsonl` or compressed `.jsonl.gz` (with an optional `.content.jsonl.zst` sidecar). Check what you have first:
+
+```bash
+ls traces/    # Look for .jsonl, .jsonl.gz, .content.jsonl.zst
+```
+
+For **raw `.jsonl`** — use `grep`, `tail`, `jq` directly.
+For **compressed `.jsonl.gz`** — use `zcat` (Linux) or `gzcat` (macOS) to decompress, then pipe to `grep`/`jq`. Or use `zgrep` for grep-like searches.
+
+```bash
+# Raw
+tail -1 trace.jsonl | jq .
+
+# Compressed (macOS)
+gzcat trace.jsonl.gz | tail -1 | jq .
+
+# Compressed (Linux)
+zcat trace.jsonl.gz | tail -1 | jq .
+```
+
+**Tip:** For large or compressed traces, prefer `traqo ui` over shell commands.
 
 ### Navigation
 ```bash
-# Overview (always start here)
-tail -1 trace.jsonl | jq .
+# Overview (always start here — last line is trace_end with stats)
+gzcat trace.jsonl.gz | tail -1 | jq .
 
 # Follow child traces
-tail -1 trace.jsonl | jq '.children[].path'
+gzcat trace.jsonl.gz | tail -1 | jq '.children[].path'
 ```
 
 ### Token Usage
 ```bash
 # Per-span tokens from metadata (input_tokens includes cached)
-grep '"token_usage"' trace.jsonl | jq '.metadata.token_usage'
+zgrep '"token_usage"' trace.jsonl.gz | jq '.metadata.token_usage'
 
 # Total from summary (includes cache breakdown)
-tail -1 trace.jsonl | jq '.stats | {total_input_tokens, total_output_tokens, total_cache_read_tokens, total_cache_creation_tokens}'
+gzcat trace.jsonl.gz | tail -1 | jq '.stats | {total_input_tokens, total_output_tokens, total_cache_read_tokens, total_cache_creation_tokens}'
 ```
 
 ### Errors
 ```bash
-grep '"status":"error"' traces/**/*.jsonl | jq '{name: .name, error: .error}'
+zgrep '"status":"error"' traces/**/*.jsonl.gz | jq '{name: .name, error: .error}'
 ```
 
 ### LLM Spans
 ```bash
 # All LLM spans
-grep '"kind":"llm"' trace.jsonl | jq '{name, metadata}'
+zgrep '"kind":"llm"' trace.jsonl.gz | jq '{name, metadata}'
 
 # LLM spans with model and duration
-grep '"kind":"llm"' trace.jsonl | grep span_end | jq '{name, model: .metadata.model, duration_s}'
-
-# Spans for a specific provider
-grep '"provider":"openai"' trace.jsonl | jq .
-```
-
-### Tags and Threads
-```bash
-# Find traces by tag
-grep '"tags"' traces/**/*.jsonl | grep production
-
-# Find all traces in a conversation
-grep '"thread_id":"conv-123"' traces/**/*.jsonl | jq .
+zgrep '"kind":"llm"' trace.jsonl.gz | grep span_end | jq '{name, model: .metadata.model, duration_s}'
 ```
 
 ### Span Tree
 ```bash
-# All spans
-grep '"type":"span_start"' trace.jsonl | jq '{id, parent_id, name, kind}'
-
-# Everything inside a specific span
-grep '"parent_id":"<span_id>"' trace.jsonl | jq .
+zgrep '"type":"span_start"' trace.jsonl.gz | jq '{id, parent_id, name, kind}'
 ```
 
-### DuckDB
-```sql
-SELECT metadata->>'model' as model,
-       count(*) as calls,
-       sum((metadata->'token_usage'->>'input_tokens')::int) as total_in,
-       sum((metadata->'token_usage'->>'output_tokens')::int) as total_out,
-       avg(duration_s) as avg_duration
-FROM read_json('traces/**/*.jsonl')
-WHERE kind = 'llm'
-GROUP BY model;
+### Python reader API
+```python
+from traqo.reader import iter_llm_spans, aggregate_tokens
+from pathlib import Path
 
--- All traces in a conversation thread
-SELECT * FROM read_json('traces/**/*.jsonl')
-WHERE thread_id = 'conv-123' AND type = 'trace_start';
+# Iterate LLM spans (handles .jsonl and .jsonl.gz transparently)
+for span in iter_llm_spans(Path("trace.jsonl.gz")):
+    print(f"{span.model}: {span.input_tokens}in/{span.output_tokens}out ({span.duration_s}s)")
+
+# Aggregate tokens by model
+aggregate_tokens(Path("trace.jsonl.gz"))
+# {'gpt-4o': {'input': 45000, 'output': 12000}}
 ```
+
+### Retrieving externalized content
+
+When a `span_start` input was too large (>10 KB), it gets replaced with a reference stub:
+```json
+{"type":"span_start","id":"abc123","input":{"_ref":"abc123","_size":245000}}
+```
+
+The full input lives in the `.content.jsonl.zst` sidecar file. To retrieve it:
+
+```python
+from traqo.compress import read_content
+from pathlib import Path
+
+# read_content streams the zst file and stops at the matching span — ~1 MB memory
+data = read_content(Path("trace.content.jsonl.zst"), "abc123")
+# Returns the original input dict, or None if not found
+```
+
+In the **trace viewer UI** (`traqo ui`), externalized inputs show a "Load full input" button that fetches on click via the `/api/content` endpoint — no manual work needed.
 
 ## Claude Code Integration
 
@@ -153,7 +181,7 @@ traqo ui s3://bucket/prefix
 traqo ui gs://bucket/prefix
 ```
 
-Features: span tree with waterfall timing, tag/status filtering, search, token usage charts, cache token totals, keyboard shortcuts (↑/↓ navigate, Esc back, ? help). Suggest the UI when the user wants to visually explore or browse traces.
+Features: span tree with waterfall timing, tag/status filtering, search, token usage charts, cache token totals, keyboard shortcuts (↑/↓ navigate, Esc back, ? help). Handles compressed `.jsonl.gz` traces and loads externalized span inputs on demand via "Load full input" button. Suggest the UI when the user wants to visually explore or browse traces.
 
 ## Adding Tracing to Code
 
