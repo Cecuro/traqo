@@ -14,7 +14,6 @@ from traqo.ui.sources import (
     LocalSource,
     TraceSummary,
     _enrich_summary,
-    _is_child_trace,
     _resolve_cloud_key,
     parse_source,
 )
@@ -118,36 +117,6 @@ class TestEnrichSummary:
 
 
 # ---------------------------------------------------------------------------
-# _is_child_trace
-# ---------------------------------------------------------------------------
-
-
-class TestIsChildTrace:
-    def test_root_trace(self):
-        first = {"type": "trace_start", "ts": "t"}
-        assert not _is_child_trace(first)
-
-    def test_child_trace(self):
-        first = {
-            "type": "trace_start",
-            "ts": "t",
-            "metadata": {"parent_trace": "/path/to/parent.jsonl"},
-        }
-        assert _is_child_trace(first)
-
-    def test_none_event(self):
-        assert not _is_child_trace(None)
-
-    def test_non_trace_start(self):
-        first = {"type": "event", "name": "something"}
-        assert not _is_child_trace(first)
-
-    def test_empty_metadata(self):
-        first = {"type": "trace_start", "metadata": {}}
-        assert not _is_child_trace(first)
-
-
-# ---------------------------------------------------------------------------
 # _resolve_cloud_key
 # ---------------------------------------------------------------------------
 
@@ -177,7 +146,9 @@ class TestResolveCloudKey:
 
     def test_nested_path(self):
         known = {"sub/dir/trace.jsonl.gz": 1.0}
-        assert _resolve_cloud_key("sub/dir/trace.jsonl", known) == "sub/dir/trace.jsonl.gz"
+        assert (
+            _resolve_cloud_key("sub/dir/trace.jsonl", known) == "sub/dir/trace.jsonl.gz"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +274,10 @@ class TestS3Source:
         return S3Source(bucket, prefix, boto3_client=mock_client)
 
     def _make_paginator(
-        self, objects: list[dict[str, Any]], *, download_events: list[dict[str, Any]] | None = None
+        self,
+        objects: list[dict[str, Any]],
+        *,
+        download_events: list[dict[str, Any]] | None = None,
     ) -> MagicMock:
         """Create a mock paginator returning a single page of objects."""
         mock_client = MagicMock()
@@ -615,7 +589,7 @@ class TestGCSSource:
         mock_client = MagicMock()
         mock_bucket = MagicMock()
         mock_client.bucket.return_value = mock_bucket
-        mock_blob = self._setup_download(mock_client, events)
+        self._setup_download(mock_client, events)
 
         source = self._make_source(mock_client)
         source._cloud_mtimes["run.jsonl.gz"] = 1.0

@@ -164,13 +164,6 @@ def _enrich_summary(
         summary.stats = last.get("stats", {})
 
 
-def _is_child_trace(first: dict[str, Any] | None) -> bool:
-    """Return True if the first event indicates this is a child trace."""
-    if not first or first.get("type") != "trace_start":
-        return False
-    return bool((first.get("metadata") or {}).get("parent_trace"))
-
-
 def _resolve_cloud_key(key: str, known_keys: dict[str, float]) -> str:
     """Resolve a key to an actual cloud key, trying alternate extensions."""
     if key in known_keys:
@@ -220,6 +213,7 @@ class LocalSource:
                 summaries.append(summary)
             except Exception:
                 continue
+        summaries.sort(key=lambda s: s.last_modified or 0, reverse=True)
         return summaries
 
     def _resolve_path(self, key: str) -> Path | None:
