@@ -19,7 +19,7 @@ Analyze JSONL traces produced by the `traqo` Python package.
 
 Traces may be stored as raw `.jsonl`, compressed `.jsonl.gz`, or split into `.jsonl.gz` (main) + `.content.jsonl.zst` (externalized large span inputs). Last line is always `trace_end` with summary stats. Start there.
 
-For compressed traces, large `span_start` inputs (>10 KB) are replaced with `{"_ref": "<span_id>", "_size": N}` stubs. The full input lives in the `.content.jsonl.zst` sidecar file.
+For compressed traces, large `span_start` inputs (>10 KB) are replaced with `{"_ref": "<span_id>", "_size": N}` stubs. The full input lives in the companion `.content.jsonl.zst` file. If you see a `_ref` stub, use `traqo ui` (loads on click) or the Python `read_content()` API to retrieve the original input.
 
 ## Event Types
 
@@ -31,7 +31,7 @@ For compressed traces, large `span_start` inputs (>10 KB) are replaced with `{"_
 | `event` | `name`, `data` (arbitrary dict) |
 | `trace_end` | `duration_s`, `output`, `stats`, `children` |
 
-Every event has `id`, `parent_id`, and `ts` (ISO timestamp). `span_start` and `span_end` share the same `id` — use it to correlate a span's start with its end. The `kind` field categorizes spans (e.g. `"llm"`, `"tool"`, `"retriever"`, `"chain"`). LLM-specific data (`model`, `provider`, `token_usage`) lives in `metadata`. `tags` is a list of strings for filtering. `thread_id` groups traces into conversations.
+Every event has `id`, `parent_id`, and `ts` (ISO timestamp). `span_start` and `span_end` share the same `id` — use it to correlate a span's start with its end. The `kind` field categorizes spans: `"llm"` (model calls), `"tool"` (tool executions), `"chain"` (orchestration/graph nodes), `"retriever"` (search/RAG). LLM-specific data (`model`, `provider`, `token_usage`) lives in `metadata`. `tags` is a list of strings for filtering. `thread_id` groups traces into conversations. `event` is a point-in-time log entry (via `tracer.log()`) — no duration, just a name and arbitrary data dict (e.g. checkpoints, metrics).
 
 Error spans have `status: "error"` and an `error` object with `{type, message, traceback}` (e.g. `{"type": "APITimeoutError", "message": "Request timed out.", "traceback": "..."}`). Success spans have `status: "ok"`.
 
@@ -101,11 +101,19 @@ aws s3 cp s3://bucket/prefix/ /tmp/traces/ --recursive --exclude "*" --include "
 # Overview (always start here — last line is trace_end with stats)
 gzcat trace.jsonl.gz | tail -1 | jq .
 
+# Compact stats (use this for large traces with many children)
+gzcat trace.jsonl.gz | tail -1 | jq '{duration_s, stats, children_count: (.children // [] | length)}'
+
+# Trace context (first line has trace name, input, tags, metadata)
+gzcat trace.jsonl.gz | head -1 | jq .
+
 # Follow child traces (file field matches the .jsonl.gz filename on disk/cloud)
 # Pipelines often split work into child traces (e.g. one per agent or batch item).
 # The parent trace_end lists all children with their file, stats, and duration.
 gzcat trace.jsonl.gz | tail -1 | jq '(.children // [])[] | {name, file, spans, total_input_tokens}'
 ```
+
+**Tip:** For traces with many children, limit output with `| .[:10]` (jq array slice) or pipe through `| head -20`.
 
 ### Token Usage
 ```bash
@@ -121,8 +129,10 @@ gzcat trace.jsonl.gz | tail -1 | jq '.stats | {total_input_tokens, total_output_
 # Single file — error has {type, message, traceback}
 gzcat trace.jsonl.gz | jq 'select(.status == "error") | {name, kind, error_type: .error.type, message: .error.message}'
 
-# Multiple files (use -h to suppress filename prefixes that break jq)
-zgrep -h '"status"' traces/*.jsonl.gz | grep error | jq '{name, error_type: .error.type, message: .error.message}'
+# Multiple files
+for f in traces/*.jsonl.gz; do
+  gzcat "$f" | jq 'select(.status == "error") | {file: "'"$(basename "$f")"'", name, error_type: .error.type, message: .error.message}'
+done
 
 # Total error count from trace summary
 gzcat trace.jsonl.gz | tail -1 | jq '.stats.errors'
@@ -136,33 +146,48 @@ gzcat trace.jsonl.gz | jq 'select(.type == "span_end" and .kind == "llm") | {nam
 # Just model names used in a trace
 gzcat trace.jsonl.gz | jq -r 'select(.type == "span_end" and .kind == "llm") | .metadata.model' | sort -u
 
-# Count LLM spans and total duration (use -s to slurp all events for aggregation)
+# Count LLM spans and total duration
 gzcat trace.jsonl.gz | jq -s '[.[] | select(.type == "span_end" and .kind == "llm")] | {count: length, total_duration_s: (map(.duration_s) | add)}'
 ```
 
-**Tip:** For root traces with many children, get a quick overview:
+All integrations (OpenAI, Anthropic, Gemini, LangChain, cc-sync) use consistent metadata field names: `model`, `model_parameters`, `time_to_first_token_s`, and `token_usage` with keys `input_tokens`, `output_tokens`, `reasoning_tokens`, `cache_read_tokens`, `cache_creation_tokens`.
+
+### Tool Usage
 ```bash
-gzcat trace.jsonl.gz | tail -1 | jq '{stats, children_count: (.children // [] | length)}'
+# Count tool calls by name
+gzcat trace.jsonl.gz | jq -r 'select(.type == "span_end" and .kind == "tool") | .name' | sort | uniq -c | sort -rn
+
+# Tool spans with duration and output preview
+gzcat trace.jsonl.gz | jq 'select(.type == "span_end" and .kind == "tool") | {name, duration_s, output: (.output | tostring | .[:100])}'
 ```
 
-All integrations (OpenAI, Anthropic, Gemini, LangChain) use consistent metadata field names: `model`, `model_parameters`, `time_to_first_token_s`, and `token_usage` with keys `input_tokens`, `output_tokens`, `reasoning_tokens`, `cache_read_tokens`, `cache_creation_tokens`.
+### LLM Reasoning / Thinking
+LLM span output is a string for text-only responses, or `{"text": "...", "reasoning": "..."}` when the model produced thinking/reasoning content.
+
+```bash
+# Extract reasoning content from LLM spans
+gzcat trace.jsonl.gz | jq 'select(.type == "span_end" and .kind == "llm" and (.output | type) == "object" and .output.reasoning) | {name, reasoning: .output.reasoning}'
+
+# All LLM outputs (handles both string and object formats)
+gzcat trace.jsonl.gz | jq 'select(.type == "span_end" and .kind == "llm") | {name, output_type: (.output | type), has_reasoning: ((.output | type) == "object" and (.output.reasoning | length) > 0)}'
+```
 
 ### Span Tree
 ```bash
-# Root spans only (top-level structure)
-# In standalone traces, root spans have parent_id == null.
-# In child/nested traces, root spans have a parent_id inherited from the parent trace.
-# To find root spans in any trace, look for the first span_start event:
+# Root span (first span_start — in child traces, parent_id points to the parent trace)
 gzcat trace.jsonl.gz | jq -s '[.[] | select(.type == "span_start")][0] | {id, parent_id, name, kind}'
 
-# All top-level spans (children of the root span)
+# Top-level spans (direct children of root)
 gzcat trace.jsonl.gz | jq -s '([.[] | select(.type == "span_start")][0].id) as $root | [.[] | select(.type == "span_start" and .parent_id == $root)] | map({id, name, kind})'
 
-# Full hierarchy (parent_id links to parent span)
+# All spans flat list (parent_id links to parent span)
 gzcat trace.jsonl.gz | jq 'select(.type == "span_start") | {id, parent_id, name, kind}'
+
+# Span kinds breakdown
+gzcat trace.jsonl.gz | jq -r 'select(.type == "span_end") | .kind' | sort | uniq -c | sort -rn
 ```
 
-For visual tree exploration with waterfall timing, use `traqo ui ./traces/` instead of shell commands.
+**Note:** The first two commands use `jq -s` (slurp) which loads the entire file into memory. For large traces (100K+ spans), use `traqo ui` instead. For visual tree exploration with waterfall timing, prefer `traqo ui ./traces/` over shell commands.
 
 ### Common Investigations
 
@@ -180,7 +205,7 @@ gzcat root.jsonl.gz | tail -1 | jq -r '(.children // [])[] | .file' | grep "agen
 for f in traces/*.jsonl.gz; do
   errors=$(gzcat "$f" | jq -s '[.[] | select(.status == "error")] | length')
   [ "$errors" -gt 0 ] && echo "$f: $errors errors"
-done
+done || true
 ```
 
 **Note:** `jq -s` (slurp) loads the entire file into memory. For very large traces (100K+ spans), prefer line-by-line `jq` or use `traqo ui` instead.
