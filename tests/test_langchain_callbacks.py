@@ -1336,7 +1336,7 @@ class TestTagsAndMetadata:
 
 
 class TestInvocationParams:
-    def test_model_params_captured_from_invocation_params(self, trace_file: Path):
+    def test_model_parameters_captured_from_invocation_params(self, trace_file: Path):
         cb = TraqoCallback()
         run_id = uuid4()
 
@@ -1366,7 +1366,7 @@ class TestInvocationParams:
         start = [
             e for e in events if e["type"] == "span_start" and e.get("kind") == "llm"
         ][0]
-        params = start["metadata"]["model_params"]
+        params = start["metadata"]["model_parameters"]
         assert params["temperature"] == 0.7
         assert params["max_tokens"] == 100
         assert params["top_p"] == 0.9
@@ -1374,7 +1374,7 @@ class TestInvocationParams:
         assert params["presence_penalty"] == 0.3
         assert params["stop"] == ["\n"]
 
-    def test_none_values_excluded_from_model_params(self, trace_file: Path):
+    def test_none_values_excluded_from_model_parameters(self, trace_file: Path):
         cb = TraqoCallback()
         run_id = uuid4()
 
@@ -1396,7 +1396,7 @@ class TestInvocationParams:
         start = [
             e for e in events if e["type"] == "span_start" and e.get("kind") == "llm"
         ][0]
-        params = start["metadata"]["model_params"]
+        params = start["metadata"]["model_parameters"]
         assert "max_tokens" not in params
         assert params["temperature"] == 0.7
 
@@ -1634,12 +1634,12 @@ class TestTTFT:
         end = [e for e in events if e["type"] == "span_end" and e.get("kind") == "llm"][
             0
         ]
-        assert "ttft_s" in end["metadata"]
-        assert isinstance(end["metadata"]["ttft_s"], float)
-        assert end["metadata"]["ttft_s"] >= 0
+        assert "time_to_first_token_s" in end["metadata"]
+        assert isinstance(end["metadata"]["time_to_first_token_s"], float)
+        assert end["metadata"]["time_to_first_token_s"] >= 0
 
     def test_ttft_only_recorded_once(self, trace_file: Path):
-        """Only the first token should set ttft_s."""
+        """Only the first token should set time_to_first_token_s."""
         cb = TraqoCallback()
         run_id = uuid4()
 
@@ -1653,12 +1653,12 @@ class TestTTFT:
 
             # Read the ttft after first token
             with cb._lock:
-                first_ttft = cb._runs[run_id]["metadata"]["ttft_s"]
+                first_ttft = cb._runs[run_id]["metadata"]["time_to_first_token_s"]
 
             # Second token should not change ttft
             cb.on_llm_new_token("Second", run_id=run_id)
             with cb._lock:
-                second_ttft = cb._runs[run_id]["metadata"]["ttft_s"]
+                second_ttft = cb._runs[run_id]["metadata"]["time_to_first_token_s"]
 
             assert first_ttft == second_ttft
 

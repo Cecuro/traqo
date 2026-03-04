@@ -736,6 +736,7 @@ def generate_trace_events(
                 "total_output_tokens": total_output_tokens,
                 "total_cache_read_tokens": total_cache_read,
                 "total_cache_creation_tokens": total_cache_create,
+                "total_reasoning_tokens": 0,
                 "errors": error_count,
             },
         }

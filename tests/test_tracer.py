@@ -49,6 +49,26 @@ class TestTraceStartEnd:
         assert stats["total_input_tokens"] == 10
         assert stats["total_output_tokens"] == 5
 
+    def test_trace_end_reasoning_tokens(self, trace_file: Path):
+        with Tracer(path=trace_file) as tracer:
+            with tracer.span(
+                "reasoning_call",
+                metadata={
+                    "token_usage": {
+                        "input_tokens": 100,
+                        "output_tokens": 50,
+                        "reasoning_tokens": 30,
+                    }
+                },
+                kind="llm",
+            ):
+                pass
+        events = read_events(trace_file)
+        stats = events[-1]["stats"]
+        assert stats["total_reasoning_tokens"] == 30
+        assert stats["total_input_tokens"] == 100
+        assert stats["total_output_tokens"] == 50
+
     def test_trace_end_token_accumulation(self, trace_file: Path):
         with Tracer(path=trace_file) as tracer:
             with tracer.span(

@@ -67,7 +67,7 @@ def iter_llm_spans(path: Path) -> Iterator[LLMSpan]:
                 continue
 
             yield LLMSpan(
-                model=metadata.get("model", "unknown"),
+                model=metadata.get("model") or "unknown",
                 input_tokens=usage.get("input_tokens", 0),
                 output_tokens=usage.get("output_tokens", 0),
                 reasoning_tokens=usage.get("reasoning_tokens", 0),

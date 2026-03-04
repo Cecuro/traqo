@@ -296,12 +296,16 @@ class TraqoCallback(BaseCallbackHandler):
                 if key in invocation_params and invocation_params[key] is not None:
                     model_params[key] = invocation_params[key]
             if model_params:
-                meta["model_params"] = model_params
+                meta["model_parameters"] = model_params
 
         # Merge LangChain metadata from kwargs
         lc_metadata = kwargs.get("metadata")
         if lc_metadata:
             meta.update(lc_metadata)
+            # Normalize LangChain's ls_model_name → model
+            ls_model = meta.pop("ls_model_name", None)
+            if ls_model and not meta.get("model"):
+                meta["model"] = ls_model
 
         start_event: dict[str, Any] = {
             "type": "span_start",
@@ -369,12 +373,16 @@ class TraqoCallback(BaseCallbackHandler):
                 if key in invocation_params and invocation_params[key] is not None:
                     model_params[key] = invocation_params[key]
             if model_params:
-                meta["model_params"] = model_params
+                meta["model_parameters"] = model_params
 
         # Merge LangChain metadata from kwargs
         lc_metadata = kwargs.get("metadata")
         if lc_metadata:
             meta.update(lc_metadata)
+            # Normalize LangChain's ls_model_name → model
+            ls_model = meta.pop("ls_model_name", None)
+            if ls_model and not meta.get("model"):
+                meta["model"] = ls_model
 
         start_event: dict[str, Any] = {
             "type": "span_start",
@@ -497,7 +505,7 @@ class TraqoCallback(BaseCallbackHandler):
             if info and "ttft_recorded" not in info:
                 info["ttft_recorded"] = True
                 ttft = (datetime.now(timezone.utc) - info["start"]).total_seconds()
-                info["metadata"]["ttft_s"] = round(ttft, 3)
+                info["metadata"]["time_to_first_token_s"] = round(ttft, 3)
 
     # -- Tool callbacks --
 

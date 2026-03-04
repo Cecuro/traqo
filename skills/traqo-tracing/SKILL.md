@@ -44,11 +44,11 @@ Every event has `id` and `parent_id` for tree reconstruction. The `kind` field c
 ```
 
 ```json
-{"type":"span_end","id":"x1y2z3","parent_id":"a1b2c3","ts":"2026-02-20T10:00:03Z","name":"classify","kind":"llm","duration_s":1.8,"status":"ok","output":"...","metadata":{"provider":"openai","model":"gpt-4o","token_usage":{"input_tokens":1500,"output_tokens":800,"cache_read_tokens":1200,"cache_creation_tokens":0}}}
+{"type":"span_end","id":"x1y2z3","parent_id":"a1b2c3","ts":"2026-02-20T10:00:03Z","name":"classify","kind":"llm","duration_s":1.8,"status":"ok","output":"...","metadata":{"provider":"openai","model":"gpt-4o","token_usage":{"input_tokens":1500,"output_tokens":800,"reasoning_tokens":200,"cache_read_tokens":1200,"cache_creation_tokens":0}}}
 ```
 
 ```json
-{"type":"trace_end","ts":"2026-02-20T10:05:00Z","duration_s":300.0,"output":{"response":"..."},"stats":{"spans":15,"events":5,"total_input_tokens":45000,"total_output_tokens":12000,"total_cache_read_tokens":30000,"total_cache_creation_tokens":5000,"errors":0},"children":[{"name":"agent_a","path":"traces/agent_a.jsonl","duration_s":45.2,"spans":3,"total_input_tokens":5000,"total_output_tokens":2000}]}
+{"type":"trace_end","ts":"2026-02-20T10:05:00Z","duration_s":300.0,"output":{"response":"..."},"stats":{"spans":15,"events":5,"total_input_tokens":45000,"total_output_tokens":12000,"total_cache_read_tokens":30000,"total_cache_creation_tokens":5000,"total_reasoning_tokens":2000,"errors":0},"children":[{"name":"agent_a","file":"agent_a_20260220T100000_abc12345.jsonl.gz","duration_s":45.2,"spans":3,"total_input_tokens":5000,"total_output_tokens":2000,"total_reasoning_tokens":500}]}
 ```
 
 ## Reading Traces
@@ -82,8 +82,8 @@ zcat trace.jsonl.gz | tail -1 | jq .
 # Overview (always start here — last line is trace_end with stats)
 gzcat trace.jsonl.gz | tail -1 | jq .
 
-# Follow child traces
-gzcat trace.jsonl.gz | tail -1 | jq '.children[].path'
+# Follow child traces (file field matches the .jsonl.gz filename on disk/cloud)
+gzcat trace.jsonl.gz | tail -1 | jq '.children[] | {name, file, spans, total_input_tokens}'
 ```
 
 ### Token Usage
@@ -91,8 +91,8 @@ gzcat trace.jsonl.gz | tail -1 | jq '.children[].path'
 # Per-span tokens from metadata (input_tokens includes cached)
 zgrep '"token_usage"' trace.jsonl.gz | jq '.metadata.token_usage'
 
-# Total from summary (includes cache breakdown)
-gzcat trace.jsonl.gz | tail -1 | jq '.stats | {total_input_tokens, total_output_tokens, total_cache_read_tokens, total_cache_creation_tokens}'
+# Total from summary (includes cache and reasoning breakdown)
+gzcat trace.jsonl.gz | tail -1 | jq '.stats | {total_input_tokens, total_output_tokens, total_cache_read_tokens, total_cache_creation_tokens, total_reasoning_tokens}'
 ```
 
 ### Errors
@@ -108,6 +108,13 @@ zgrep '"kind":"llm"' trace.jsonl.gz | jq '{name, metadata}'
 # LLM spans with model and duration
 zgrep '"kind":"llm"' trace.jsonl.gz | grep span_end | jq '{name, model: .metadata.model, duration_s}'
 ```
+
+**Tip:** For root traces with many children, get a quick overview:
+```bash
+gzcat trace.jsonl.gz | tail -1 | jq '{stats, children_count: (.children | length)}'
+```
+
+All integrations (OpenAI, Anthropic, Gemini, LangChain) use consistent metadata field names: `model`, `model_parameters`, `time_to_first_token_s`, and `token_usage` with keys `input_tokens`, `output_tokens`, `reasoning_tokens`, `cache_read_tokens`, `cache_creation_tokens`.
 
 ### Span Tree
 ```bash
