@@ -148,11 +148,12 @@ function ChildSpanTree({
   const t1 = traceEnd?.ts ? new Date(traceEnd.ts).getTime() : t0;
   const dur = t1 - t0 || 1;
 
-  // Build tree
+  // Build tree — treat orphaned spans (parent not in this file) as roots
+  const spanIds = new Set(spans.map((s) => s.id));
   const roots: typeof spans = [];
   const childrenMap = new Map<string, typeof spans>();
   for (const s of spans) {
-    if (!s.parent_id) {
+    if (!s.parent_id || !spanIds.has(s.parent_id)) {
       roots.push(s);
     } else {
       const arr = childrenMap.get(s.parent_id) ?? [];
