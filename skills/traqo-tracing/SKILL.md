@@ -31,7 +31,9 @@ For compressed traces, large `span_start` inputs (>10 KB) are replaced with `{"_
 | `event` | `name`, `data` (arbitrary dict) |
 | `trace_end` | `duration_s`, `output`, `stats`, `children` |
 
-Every event has `id` and `parent_id` for tree reconstruction. The `kind` field categorizes spans (e.g. `"llm"`, `"tool"`, `"retriever"`). LLM-specific data (`model`, `provider`, `token_usage`) lives in `metadata`. `tags` is a list of strings for filtering. `thread_id` groups traces into conversations.
+Every event has `id`, `parent_id`, and `ts` (ISO timestamp). `span_start` and `span_end` share the same `id` — use it to correlate a span's start with its end. The `kind` field categorizes spans (e.g. `"llm"`, `"tool"`, `"retriever"`, `"chain"`). LLM-specific data (`model`, `provider`, `token_usage`) lives in `metadata`. `tags` is a list of strings for filtering. `thread_id` groups traces into conversations.
+
+Error spans have `status: "error"` and an `error` object with `{type, message, traceback}` (e.g. `{"type": "APITimeoutError", "message": "Request timed out.", "traceback": "..."}`). Success spans have `status: "ok"`.
 
 ## Event Structure
 
@@ -50,6 +52,12 @@ Every event has `id` and `parent_id` for tree reconstruction. The `kind` field c
 ```json
 {"type":"trace_end","ts":"2026-02-20T10:05:00Z","duration_s":300.0,"output":{"response":"..."},"stats":{"spans":15,"events":5,"total_input_tokens":45000,"total_output_tokens":12000,"total_cache_read_tokens":30000,"total_cache_creation_tokens":5000,"total_reasoning_tokens":2000,"errors":0},"children":[{"name":"agent_a","file":"agent_a_20260220T100000_abc12345.jsonl.gz","duration_s":45.2,"spans":3,"total_input_tokens":5000,"total_output_tokens":2000,"total_reasoning_tokens":500}]}
 ```
+
+## Nested Traces
+
+Pipelines can split work into **child traces** — separate `.jsonl.gz` files for each sub-task (e.g. one per agent, batch item, or concurrent worker). The parent trace's `trace_end` lists all children in its `children` array. Each child entry has: `name`, `file` (the `.jsonl.gz` filename), `duration_s`, `spans`, `total_input_tokens`, `total_output_tokens`, `total_reasoning_tokens`.
+
+A child trace is a complete, self-contained trace file with its own `trace_start`/`trace_end`. Navigate to it by downloading the file referenced in `children[].file`. Child traces may themselves have children (arbitrary nesting depth).
 
 ## Reading Traces
 
@@ -110,11 +118,14 @@ gzcat trace.jsonl.gz | tail -1 | jq '.stats | {total_input_tokens, total_output_
 
 ### Errors
 ```bash
-# Single file
-gzcat trace.jsonl.gz | jq 'select(.status == "error") | {name, error}'
+# Single file — error has {type, message, traceback}
+gzcat trace.jsonl.gz | jq 'select(.status == "error") | {name, kind, error_type: .error.type, message: .error.message}'
 
 # Multiple files (use -h to suppress filename prefixes that break jq)
-zgrep -h '"status"' traces/*.jsonl.gz | grep error | jq '{name, error}'
+zgrep -h '"status"' traces/*.jsonl.gz | grep error | jq '{name, error_type: .error.type, message: .error.message}'
+
+# Total error count from trace summary
+gzcat trace.jsonl.gz | tail -1 | jq '.stats.errors'
 ```
 
 ### LLM Spans
@@ -152,6 +163,27 @@ gzcat trace.jsonl.gz | jq 'select(.type == "span_start") | {id, parent_id, name,
 ```
 
 For visual tree exploration with waterfall timing, use `traqo ui ./traces/` instead of shell commands.
+
+### Common Investigations
+
+```bash
+# Find the slowest child trace
+gzcat root.jsonl.gz | tail -1 | jq '(.children // []) | sort_by(-.duration_s) | .[0] | {name, file, duration_s, spans}'
+
+# Find the most expensive child trace (by input tokens)
+gzcat root.jsonl.gz | tail -1 | jq '(.children // []) | sort_by(-.total_input_tokens) | .[0] | {name, file, total_input_tokens}'
+
+# Download a specific child trace by name (from the children list)
+gzcat root.jsonl.gz | tail -1 | jq -r '(.children // [])[] | .file' | grep "agent_name" | xargs -I{} gcloud storage cp "gs://bucket/prefix/{}" /tmp/traces/
+
+# Find which child traces had errors (requires downloading them first)
+for f in traces/*.jsonl.gz; do
+  errors=$(gzcat "$f" | jq -s '[.[] | select(.status == "error")] | length')
+  [ "$errors" -gt 0 ] && echo "$f: $errors errors"
+done
+```
+
+**Note:** `jq -s` (slurp) loads the entire file into memory. For very large traces (100K+ spans), prefer line-by-line `jq` or use `traqo ui` instead.
 
 ### Python reader API
 ```python
