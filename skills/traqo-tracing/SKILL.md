@@ -77,19 +77,30 @@ zcat trace.jsonl.gz | tail -1 | jq .
 
 **Tip:** For large or compressed traces, prefer `traqo ui` over shell commands.
 
+### Downloading traces from cloud storage
+```bash
+# GCS
+gcloud storage cp gs://bucket/prefix/trace.jsonl.gz /tmp/
+gcloud storage cp "gs://bucket/prefix/*.jsonl.gz" /tmp/traces/
+
+# S3
+aws s3 cp s3://bucket/prefix/trace.jsonl.gz /tmp/
+aws s3 cp s3://bucket/prefix/ /tmp/traces/ --recursive --exclude "*" --include "*.jsonl.gz"
+```
+
 ### Navigation
 ```bash
 # Overview (always start here — last line is trace_end with stats)
 gzcat trace.jsonl.gz | tail -1 | jq .
 
 # Follow child traces (file field matches the .jsonl.gz filename on disk/cloud)
-gzcat trace.jsonl.gz | tail -1 | jq '.children[] | {name, file, spans, total_input_tokens}'
+gzcat trace.jsonl.gz | tail -1 | jq '(.children // [])[] | {name, file, spans, total_input_tokens}'
 ```
 
 ### Token Usage
 ```bash
 # Per-span tokens from metadata (input_tokens includes cached)
-zgrep '"token_usage"' trace.jsonl.gz | jq '.metadata.token_usage'
+gzcat trace.jsonl.gz | jq 'select(.metadata.token_usage) | .metadata.token_usage'
 
 # Total from summary (includes cache and reasoning breakdown)
 gzcat trace.jsonl.gz | tail -1 | jq '.stats | {total_input_tokens, total_output_tokens, total_cache_read_tokens, total_cache_creation_tokens, total_reasoning_tokens}'
@@ -97,28 +108,33 @@ gzcat trace.jsonl.gz | tail -1 | jq '.stats | {total_input_tokens, total_output_
 
 ### Errors
 ```bash
-zgrep '"status":"error"' traces/**/*.jsonl.gz | jq '{name: .name, error: .error}'
+# Single file
+gzcat trace.jsonl.gz | jq 'select(.status == "error") | {name, error}'
+
+# Multiple files (use -h to suppress filename prefixes that break jq)
+zgrep -h '"status"' traces/*.jsonl.gz | grep error | jq '{name, error}'
 ```
 
 ### LLM Spans
 ```bash
-# All LLM spans
-zgrep '"kind":"llm"' trace.jsonl.gz | jq '{name, metadata}'
+# All LLM span_end events with model, duration, and token usage
+gzcat trace.jsonl.gz | jq 'select(.type == "span_end" and .kind == "llm") | {name, model: .metadata.model, duration_s, tokens: .metadata.token_usage}'
 
-# LLM spans with model and duration
-zgrep '"kind":"llm"' trace.jsonl.gz | grep span_end | jq '{name, model: .metadata.model, duration_s}'
+# Just model names used in a trace
+gzcat trace.jsonl.gz | jq -r 'select(.type == "span_end" and .kind == "llm") | .metadata.model' | sort -u
 ```
 
 **Tip:** For root traces with many children, get a quick overview:
 ```bash
-gzcat trace.jsonl.gz | tail -1 | jq '{stats, children_count: (.children | length)}'
+gzcat trace.jsonl.gz | tail -1 | jq '{stats, children_count: (.children // [] | length)}'
 ```
 
 All integrations (OpenAI, Anthropic, Gemini, LangChain) use consistent metadata field names: `model`, `model_parameters`, `time_to_first_token_s`, and `token_usage` with keys `input_tokens`, `output_tokens`, `reasoning_tokens`, `cache_read_tokens`, `cache_creation_tokens`.
 
 ### Span Tree
 ```bash
-zgrep '"type":"span_start"' trace.jsonl.gz | jq '{id, parent_id, name, kind}'
+# Dump span hierarchy (parent_id: null = root span, matching parent_id = siblings)
+gzcat trace.jsonl.gz | jq 'select(.type == "span_start") | {id, parent_id, name, kind}'
 ```
 
 ### Python reader API
