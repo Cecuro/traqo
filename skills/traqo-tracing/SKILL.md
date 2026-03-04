@@ -124,6 +124,9 @@ gzcat trace.jsonl.gz | jq 'select(.type == "span_end" and .kind == "llm") | {nam
 
 # Just model names used in a trace
 gzcat trace.jsonl.gz | jq -r 'select(.type == "span_end" and .kind == "llm") | .metadata.model' | sort -u
+
+# Count LLM spans and total duration (use -s to slurp all events for aggregation)
+gzcat trace.jsonl.gz | jq -s '[.[] | select(.type == "span_end" and .kind == "llm")] | {count: length, total_duration_s: (map(.duration_s) | add)}'
 ```
 
 **Tip:** For root traces with many children, get a quick overview:
@@ -136,9 +139,15 @@ All integrations (OpenAI, Anthropic, Gemini, LangChain) use consistent metadata 
 ### Span Tree
 ```bash
 # Root spans only (top-level structure)
-gzcat trace.jsonl.gz | jq 'select(.type == "span_start" and .parent_id == null) | {id, name, kind}'
+# In standalone traces, root spans have parent_id == null.
+# In child/nested traces, root spans have a parent_id inherited from the parent trace.
+# To find root spans in any trace, look for the first span_start event:
+gzcat trace.jsonl.gz | jq -s '[.[] | select(.type == "span_start")][0] | {id, parent_id, name, kind}'
 
-# Full hierarchy (parent_id: null = root span, matching parent_id = siblings)
+# All top-level spans (children of the root span)
+gzcat trace.jsonl.gz | jq -s '([.[] | select(.type == "span_start")][0].id) as $root | [.[] | select(.type == "span_start" and .parent_id == $root)] | map({id, name, kind})'
+
+# Full hierarchy (parent_id links to parent span)
 gzcat trace.jsonl.gz | jq 'select(.type == "span_start") | {id, parent_id, name, kind}'
 ```
 
