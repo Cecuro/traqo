@@ -235,7 +235,7 @@ class TraqoCallback(BaseCallbackHandler):
     def _extract_model_from_serialized(
         self, serialized: dict[str, Any] | None, **kwargs: Any
     ) -> str:
-        if "name" in kwargs:
+        if kwargs.get("name"):
             return kwargs["name"]
         if serialized is not None:
             ser_kwargs = serialized.get("kwargs", {})
@@ -306,6 +306,9 @@ class TraqoCallback(BaseCallbackHandler):
             ls_model = meta.pop("ls_model_name", None)
             if ls_model and not meta.get("model"):
                 meta["model"] = ls_model
+
+        # Resolve final model name: prefer metadata (may have been fixed above)
+        model = meta.get("model") or model
 
         start_event: dict[str, Any] = {
             "type": "span_start",
@@ -383,6 +386,9 @@ class TraqoCallback(BaseCallbackHandler):
             ls_model = meta.pop("ls_model_name", None)
             if ls_model and not meta.get("model"):
                 meta["model"] = ls_model
+
+        # Resolve final model name: prefer metadata (may have been fixed above)
+        model = meta.get("model") or model
 
         start_event: dict[str, Any] = {
             "type": "span_start",
