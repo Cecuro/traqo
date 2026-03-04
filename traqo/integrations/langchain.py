@@ -221,7 +221,7 @@ class TraqoCallback(BaseCallbackHandler):
         serialized: dict[str, Any] | None, fallback: str, **kwargs: Any
     ) -> str:
         """Extract a span name, preferring kwargs['name'] (LangChain v0.3+)."""
-        if "name" in kwargs:
+        if kwargs.get("name"):
             return kwargs["name"]
         if serialized is not None:
             id_parts = serialized.get("id", [])
@@ -585,11 +585,20 @@ class TraqoCallback(BaseCallbackHandler):
         if not info:
             return
         duration = (datetime.now(timezone.utc) - info["start"]).total_seconds()
+
+        # Resolve tool name: prefer name from on_tool_start, but LangGraph
+        # often passes name=None there. Fall back to output.name (ToolMessage).
+        name = info["name"]
+        if not name or name == "tool":
+            tool_name = getattr(output, "name", None)
+            if tool_name:
+                name = tool_name
+
         end_event: dict[str, Any] = {
             "type": "span_end",
             "id": info["span_id"],
             "parent_id": info["parent_id"],
-            "name": info["name"],
+            "name": name,
             "ts": _now(),
             "duration_s": round(duration, 3),
             "status": "ok",

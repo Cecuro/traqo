@@ -397,7 +397,13 @@ def generate_trace_events(
         for am in turn.assistant_messages:
             text_output = _extract_text(am.content_blocks)
             tool_uses = _extract_tool_uses(am.content_blocks)
-            has_thinking = any(b.get("type") == "thinking" for b in am.content_blocks)
+            thinking_parts = [
+                b.get("thinking", "")
+                for b in am.content_blocks
+                if b.get("type") == "thinking" and b.get("thinking")
+            ]
+            thinking_text = "\n".join(thinking_parts)
+            has_thinking = bool(thinking_text)
 
             cache_read = am.usage.get("cache_read_input_tokens", 0)
             cache_create = am.usage.get("cache_creation_input_tokens", 0)
@@ -468,8 +474,15 @@ def generate_trace_events(
                     "status": "ok",
                     "metadata": llm_metadata,
                 }
-                if text_output:
+                if text_output and thinking_text:
+                    llm_end["output"] = {
+                        "text": text_output,
+                        "reasoning": thinking_text,
+                    }
+                elif text_output:
                     llm_end["output"] = text_output
+                elif thinking_text:
+                    llm_end["output"] = {"reasoning": thinking_text}
                 if llm_duration is not None:
                     llm_end["duration_s"] = llm_duration
                 events.append(llm_end)
