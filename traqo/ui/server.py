@@ -49,6 +49,11 @@ def _make_handler(source: TraceSource, static_dir: Path):
                 qs = urllib.parse.parse_qs(parsed.query)
                 file_param = qs.get("file", [None])[0]
                 self._handle_trace_detail(file_param)
+            elif path == "/api/content":
+                qs = urllib.parse.parse_qs(parsed.query)
+                file_param = qs.get("file", [None])[0]
+                span_id = qs.get("span_id", [None])[0]
+                self._handle_content(file_param, span_id)
             elif path == "/":
                 self._serve_static("index.html")
             else:
@@ -115,6 +120,22 @@ def _make_handler(source: TraceSource, static_dir: Path):
                 return
 
             self._json_response({"file": file_param, "events": events})
+
+        def _handle_content(self, file_param: str | None, span_id: str | None) -> None:
+            if not file_param or not span_id:
+                self._json_response(
+                    {"error": "Missing ?file= and ?span_id= parameters"}, 400
+                )
+                return
+
+            content = source.read_content(file_param, span_id)
+            if content is None:
+                self._json_response(
+                    {"error": f"Content not found for span {span_id}"}, 404
+                )
+                return
+
+            self._json_response({"span_id": span_id, "input": content})
 
         def log_message(self, format: str, *args: Any) -> None:
             # Quieter logging — only show errors

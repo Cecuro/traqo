@@ -1,4 +1,7 @@
+import { useState, useCallback } from "react";
 import type { ParsedSpan, ParsedTrace, TraceEvent } from "../../types";
+import { isContentRef, type ContentRef } from "../../types";
+import { fetchContent } from "../../api";
 import { fmtDur, fmtTimeFull, kindBadgeClass } from "../../utils";
 import { JsonSection } from "./JsonSection";
 import { TokenBar } from "./TokenBar";
@@ -6,9 +9,10 @@ import { TokenBar } from "./TokenBar";
 interface Props {
   spanId: string | null;
   parsedTrace: ParsedTrace;
+  fileKey?: string;
 }
 
-export function SpanDetail({ spanId, parsedTrace }: Props) {
+export function SpanDetail({ spanId, parsedTrace, fileKey }: Props) {
   if (!spanId) {
     return (
       <div className="flex flex-col items-center justify-center text-text-dim gap-2 py-16">
@@ -40,7 +44,7 @@ export function SpanDetail({ spanId, parsedTrace }: Props) {
       const child = parsedTrace.childTracers.get(childName);
       if (child?.parsed) {
         const span = child.parsed.spans.find((s) => s.id === childSpanId);
-        if (span) return <SpanContent span={span} />;
+        if (span) return <SpanContent span={span} fileKey={fileKey} />;
       }
     }
   }
@@ -55,10 +59,10 @@ export function SpanDetail({ spanId, parsedTrace }: Props) {
     );
   }
 
-  return <SpanContent span={span} />;
+  return <SpanContent span={span} fileKey={fileKey} />;
 }
 
-function SpanContent({ span }: { span: ParsedSpan }) {
+function SpanContent({ span, fileKey }: { span: ParsedSpan; fileKey?: string }) {
   const meta = span.metadata as Record<string, unknown> | undefined;
   const tokenUsage = meta?.token_usage as
     | {
@@ -69,6 +73,8 @@ function SpanContent({ span }: { span: ParsedSpan }) {
         cache_creation_tokens?: number;
       }
     | undefined;
+
+  const inputIsRef = isContentRef(span.input);
 
   return (
     <div>
@@ -179,7 +185,13 @@ function SpanContent({ span }: { span: ParsedSpan }) {
       )}
 
       {/* JSON sections */}
-      {span.input != null && <JsonSection title="Input" value={span.input} />}
+      {span.input != null && (
+        inputIsRef && fileKey ? (
+          <LazyContentSection spanId={span.id} fileKey={fileKey} size={(span.input as ContentRef)._size} />
+        ) : (
+          <JsonSection title="Input" value={span.input} />
+        )
+      )}
       {span.output != null && (
         <JsonSection title="Output" value={span.output} />
       )}
@@ -191,6 +203,60 @@ function SpanContent({ span }: { span: ParsedSpan }) {
           <JsonSection title="Metadata" value={m} />
         ) : null;
       })()}
+    </div>
+  );
+}
+
+function LazyContentSection({
+  spanId,
+  fileKey,
+  size,
+}: {
+  spanId: string;
+  fileKey: string;
+  size: number;
+}) {
+  const [content, setContent] = useState<unknown>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleLoad = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchContent(fileKey, spanId);
+      setContent(data.input);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load content");
+    } finally {
+      setLoading(false);
+    }
+  }, [fileKey, spanId]);
+
+  if (content != null) {
+    return <JsonSection title="Input" value={content} />;
+  }
+
+  const sizeKB = Math.round(size / 1024);
+
+  return (
+    <div className="mb-6">
+      <div className="text-sm font-semibold text-text-muted mb-3">Input</div>
+      <div className="bg-bg-card rounded-xl ring-1 ring-border/30 p-5 flex flex-col items-center gap-3">
+        <div className="text-sm text-text-dim">
+          Large input externalized ({sizeKB} KB)
+        </div>
+        <button
+          onClick={handleLoad}
+          disabled={loading}
+          className="px-4 py-2 text-sm font-medium rounded-lg bg-accent/10 text-accent hover:bg-accent/20 transition-colors disabled:opacity-50 cursor-pointer"
+        >
+          {loading ? "Loading..." : "Load full input"}
+        </button>
+        {error && (
+          <div className="text-sm text-err">{error}</div>
+        )}
+      </div>
     </div>
   );
 }

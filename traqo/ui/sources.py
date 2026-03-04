@@ -7,6 +7,7 @@ full file content is downloaded on first access and served from cache thereafter
 
 from __future__ import annotations
 
+import gzip
 import json
 import logging
 import tempfile
@@ -59,16 +60,25 @@ class TraceSource(Protocol):
 
     def read_all(self, key: str) -> list[dict[str, Any]]: ...
 
+    def read_content(self, key: str, span_id: str) -> Any | None: ...
+
 
 # ---------------------------------------------------------------------------
 # Helpers (moved from server.py)
 # ---------------------------------------------------------------------------
 
 
+def _open_jsonl(path: Path):
+    """Open a JSONL file, transparently handling .gz compression."""
+    if path.name.endswith(".gz"):
+        return gzip.open(path, "rt", encoding="utf-8")
+    return open(path, encoding="utf-8")
+
+
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     """Read a JSONL file and return list of parsed events."""
     events: list[dict[str, Any]] = []
-    with open(path, encoding="utf-8") as f:
+    with _open_jsonl(path) as f:
         for line in f:
             line = line.strip()
             if line:
@@ -85,7 +95,7 @@ def _read_first_last_lines(
     """Read only the first and last lines of a JSONL file for fast summary."""
     first = None
     last = None
-    with open(path, encoding="utf-8") as f:
+    with _open_jsonl(path) as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -98,6 +108,26 @@ def _read_first_last_lines(
                 first = parsed
             last = parsed
     return first, last
+
+
+def _content_key(key: str) -> str | None:
+    """Derive the content file key from a main trace key.
+
+    ``"trace.jsonl.gz"`` -> ``"trace.content.jsonl.zst"``
+    ``"trace.jsonl"`` -> ``"trace.content.jsonl.zst"``
+    """
+    if key.endswith(".jsonl.gz"):
+        return key[: -len(".jsonl.gz")] + ".content.jsonl.zst"
+    if key.endswith(".jsonl"):
+        return key[: -len(".jsonl")] + ".content.jsonl.zst"
+    return None
+
+
+def _is_trace_file(name: str) -> bool:
+    """Return True if the filename is a main trace file (not a content file)."""
+    if name.endswith(".content.jsonl.zst"):
+        return False
+    return name.endswith(".jsonl") or name.endswith(".jsonl.gz")
 
 
 def _enrich_summary(
@@ -126,15 +156,28 @@ class LocalSource:
         self._path = path.resolve()
 
     def list_traces(self) -> list[TraceSummary]:
-        jsonl_files = sorted(
-            self._path.rglob("*.jsonl"),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )
+        # Collect both *.jsonl and *.jsonl.gz, excluding *.content.jsonl.zst
+        trace_files: list[Path] = []
+        for f in self._path.rglob("*"):
+            if f.is_file() and _is_trace_file(f.name):
+                trace_files.append(f)
+        trace_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+
+        # Deduplicate: if both .jsonl and .jsonl.gz exist, prefer .jsonl.gz
+        seen_stems: set[str] = set()
         summaries: list[TraceSummary] = []
-        for f in jsonl_files:
+        for f in trace_files:
+            key = str(f.relative_to(self._path))
+            # Normalize stem for dedup: strip .jsonl.gz or .jsonl
+            if f.name.endswith(".jsonl.gz"):
+                stem = f.name[: -len(".jsonl.gz")]
+            else:
+                stem = f.name[: -len(".jsonl")]
+            rel_stem = str(f.parent.relative_to(self._path) / stem)
+            if rel_stem in seen_stems:
+                continue
+            seen_stems.add(rel_stem)
             try:
-                key = str(f.relative_to(self._path))
                 first, last = _read_first_last_lines(f)
                 summary = TraceSummary(
                     key=key, file=key, last_modified=f.stat().st_mtime
@@ -162,6 +205,17 @@ class LocalSource:
         if not target.is_file():
             return []
         return _read_jsonl(target)
+
+    def read_content(self, key: str, span_id: str) -> Any | None:
+        content_rel = _content_key(key)
+        if content_rel is None:
+            return None
+        target = (self._path / content_rel).resolve()
+        if not self._is_safe_path(target) or not target.is_file():
+            return None
+        from traqo.compress import read_content
+
+        return read_content(target, span_id)
 
     def _is_safe_path(self, resolved: Path) -> bool:
         try:
@@ -204,10 +258,9 @@ class S3Source:
         for page in paginator.paginate(Bucket=self._bucket, Prefix=self._prefix):
             for obj in page.get("Contents", []):
                 obj_key: str = obj["Key"]
-                if not obj_key.endswith(".jsonl"):
-                    continue
-                # Strip prefix for display
                 rel = obj_key[len(self._prefix) :] if self._prefix else obj_key
+                if not _is_trace_file(rel):
+                    continue
                 mtime = obj["LastModified"].timestamp()
                 self._cloud_mtimes[rel] = mtime
 
@@ -256,6 +309,25 @@ class S3Source:
 
         return _read_jsonl(cached)
 
+    def read_content(self, key: str, span_id: str) -> Any | None:
+        content_rel = _content_key(key)
+        if content_rel is None:
+            return None
+        cached = self._cache_dir / content_rel
+        if not cached.is_file():
+            try:
+                self._download(content_rel, cached)
+            except Exception:
+                logger.warning(
+                    "traqo: failed to download content file %s",
+                    content_rel,
+                    exc_info=True,
+                )
+                return None
+        from traqo.compress import read_content
+
+        return read_content(cached, span_id)
+
     def _download(self, key: str, dest: Path) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
         s3_key = f"{self._prefix}{key}"
@@ -296,9 +368,9 @@ class GCSSource:
         blobs = self._bucket.list_blobs(prefix=self._prefix or None)
         for blob in blobs:
             name: str = blob.name
-            if not name.endswith(".jsonl"):
-                continue
             rel = name[len(self._prefix) :] if self._prefix else name
+            if not _is_trace_file(rel):
+                continue
             mtime = blob.updated.timestamp() if blob.updated else 0.0
             self._cloud_mtimes[rel] = mtime
 
@@ -344,6 +416,25 @@ class GCSSource:
             self._download(key, cached)
 
         return _read_jsonl(cached)
+
+    def read_content(self, key: str, span_id: str) -> Any | None:
+        content_rel = _content_key(key)
+        if content_rel is None:
+            return None
+        cached = self._cache_dir / content_rel
+        if not cached.is_file():
+            try:
+                self._download(content_rel, cached)
+            except Exception:
+                logger.warning(
+                    "traqo: failed to download content file %s",
+                    content_rel,
+                    exc_info=True,
+                )
+                return None
+        from traqo.compress import read_content
+
+        return read_content(cached, span_id)
 
     def _download(self, key: str, dest: Path) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)

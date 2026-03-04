@@ -70,9 +70,19 @@ class GCSBackend:
     def _upload(self, trace_path: Path) -> None:
         blob_name = self._make_blob_name(trace_path)
         blob = self._bucket.blob(blob_name)
+
+        name = trace_path.name
+        if name.endswith(".jsonl.gz"):
+            blob.content_encoding = "gzip"
+            content_type = "application/x-ndjson"
+        elif name.endswith(".content.jsonl.zst"):
+            content_type = "application/zstd"
+        else:
+            content_type = "application/x-ndjson"
+
         blob.upload_from_filename(
             str(trace_path),
-            content_type="application/x-ndjson",
+            content_type=content_type,
             **self._upload_kwargs,
         )
         logger.debug(

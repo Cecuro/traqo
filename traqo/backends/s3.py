@@ -66,11 +66,27 @@ class S3Backend:
 
     def _upload(self, trace_path: Path) -> None:
         key = self._make_key(trace_path)
+
+        name = trace_path.name
+        extra_args: dict[str, Any] = {}
+        if name.endswith(".jsonl.gz"):
+            extra_args["ContentEncoding"] = "gzip"
+            extra_args["ContentType"] = "application/x-ndjson"
+        elif name.endswith(".content.jsonl.zst"):
+            extra_args["ContentType"] = "application/zstd"
+        else:
+            extra_args["ContentType"] = "application/x-ndjson"
+
+        merged = {**self._upload_kwargs}
+        if extra_args:
+            existing = merged.get("ExtraArgs", {})
+            merged["ExtraArgs"] = {**existing, **extra_args}
+
         self._client.upload_file(
             str(trace_path),
             self._bucket,
             key,
-            **self._upload_kwargs,
+            **merged,
         )
         logger.debug(
             "traqo: uploaded %s to s3://%s/%s",

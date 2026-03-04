@@ -116,7 +116,8 @@ class TestTracerBackendIntegration:
         with Tracer(path=trace_file, backends=[backend]):
             pass
         assert len(backend.trace_complete_paths) == 1
-        assert backend.trace_complete_paths[0] == trace_file
+        # After split-and-compress, backends receive the .jsonl.gz file
+        assert backend.trace_complete_paths[0].name.endswith(".jsonl.gz")
 
     def test_backend_close_not_called_from_exit(self, trace_file):
         """Backends are long-lived — close() is NOT called from __exit__."""
@@ -252,12 +253,9 @@ class TestLocalBackend:
 
         copied_files = list(target_dir.iterdir())
         assert len(copied_files) == 1
-        assert copied_files[0].suffix == ".jsonl"
-        assert "run" in copied_files[0].stem
-        # Verify content matches
-        original_events = read_events(trace_file)
-        copied_events = read_events(copied_files[0])
-        assert original_events == copied_events
+        # After split-and-compress, the copied file is compressed (.gz)
+        assert copied_files[0].name.endswith(".gz")
+        assert "run" in copied_files[0].name
 
     def test_organize_by_date(self, tmp_path):
         trace_file = tmp_path / "run.jsonl"

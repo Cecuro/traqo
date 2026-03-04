@@ -253,42 +253,73 @@ class Tracer:
                     exc_info=True,
                 )
 
-    def _notify_backends_complete(self) -> list[Future]:
+    def _prepare_for_upload(self) -> list[Path]:
+        """Split and compress the trace file for upload.
+
+        Returns a list of paths to upload (main + optional content file).
+        Falls back to the original file on any error.
+        """
+        if self._disabled or not self._path.is_file():
+            return [self._path]
+        try:
+            from traqo.compress import split_and_compress
+
+            main_path, content_path = split_and_compress(self._path)
+            paths = [main_path]
+            if content_path is not None:
+                paths.append(content_path)
+            return paths
+        except Exception:
+            logger.warning(
+                "traqo: split_and_compress failed, uploading raw file",
+                exc_info=True,
+            )
+            return [self._path]
+
+    def _notify_backends_complete(
+        self, upload_paths: list[Path] | None = None
+    ) -> list[Future]:
         """Notify all backends that the trace file is complete. Returns futures."""
         futures: list[Future] = []
         if self._disabled or not self._backends:
             return futures
+        paths = upload_paths or [self._path]
         for backend in self._backends:
-            try:
-                result = backend.on_trace_complete(self._path)
-                if result is not None:
-                    futures.append(result)
-            except Exception:
-                logger.warning(
-                    "traqo: backend on_trace_complete failed for %s",
-                    type(backend).__name__,
-                    exc_info=True,
-                )
+            for path in paths:
+                try:
+                    result = backend.on_trace_complete(path)
+                    if result is not None:
+                        futures.append(result)
+                except Exception:
+                    logger.warning(
+                        "traqo: backend on_trace_complete failed for %s",
+                        type(backend).__name__,
+                        exc_info=True,
+                    )
         return futures
 
-    def _schedule_cleanup(self, upload_futures: list[Future]) -> None:
+    def _schedule_cleanup(
+        self, upload_futures: list[Future], upload_paths: list[Path] | None = None
+    ) -> None:
         """Delete the auto-generated buffer file after backends finish uploading."""
         if not self._auto_path or not self._backends:
             return
         from traqo.backend import submit_background
 
-        path = self._path
+        raw_path = self._path
+        extra_paths = upload_paths or []
 
         def _wait_and_delete():
             for fut in upload_futures:
                 with contextlib.suppress(Exception):
                     fut.result(timeout=600)
-            try:
-                path.unlink(missing_ok=True)
-            except Exception:
-                logger.warning(
-                    "traqo: failed to clean up buffer %s", path, exc_info=True
-                )
+            for p in [raw_path, *extra_paths]:
+                try:
+                    p.unlink(missing_ok=True)
+                except Exception:
+                    logger.warning(
+                        "traqo: failed to clean up buffer %s", p, exc_info=True
+                    )
 
         submit_background(_wait_and_delete)
 
@@ -360,8 +391,9 @@ class Tracer:
         self._write(end_event)
         try:
             self._close()
-            futures = self._notify_backends_complete()
-            self._schedule_cleanup(futures)
+            upload_paths = self._prepare_for_upload()
+            futures = self._notify_backends_complete(upload_paths)
+            self._schedule_cleanup(futures, upload_paths)
         finally:
             if self._token is not None:
                 _active_tracer.reset(self._token)

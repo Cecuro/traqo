@@ -6,6 +6,7 @@ raw JSONL event schema.
 
 from __future__ import annotations
 
+import gzip
 import json
 import logging
 from collections.abc import Iterator
@@ -43,7 +44,8 @@ def iter_llm_spans(path: Path) -> Iterator[LLMSpan]:
     Yields:
         LLMSpan for each completed LLM call in the trace.
     """
-    with open(path, encoding="utf-8") as f:
+    opener = gzip.open if path.name.endswith(".gz") else open
+    with opener(path, "rt", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:

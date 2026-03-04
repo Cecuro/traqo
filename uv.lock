@@ -1882,8 +1882,11 @@ wheels = [
 
 [[package]]
 name = "traqo"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "." }
+dependencies = [
+    { name = "zstandard" },
+]
 
 [package.optional-dependencies]
 all = [
@@ -1932,6 +1935,7 @@ requires-dist = [
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.12.0" },
     { name = "traqo", extras = ["langchain", "openai", "anthropic", "gemini", "s3", "gcs"], marker = "extra == 'all'" },
+    { name = "zstandard", specifier = ">=0.23" },
 ]
 provides-extras = ["langchain", "openai", "anthropic", "gemini", "s3", "gcs", "all", "dev"]
 
