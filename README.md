@@ -175,6 +175,16 @@ with Tracer(Path("traces/pipeline.jsonl"), tags=["ci"]) as tracer:
 
 The parent `trace_end` rolls up token usage and span counts from all child agents.
 
+## Agent Skill
+
+Give your AI coding assistant full knowledge of traqo traces — reading, querying, instrumenting, and launching the UI.
+
+```bash
+npx skills add Cecuro/traqo --yes --global
+```
+
+Works with Claude Code, Cursor, Copilot, Codex, and other agents. Once installed, the agent can navigate traces, extract token usage, find errors, and add tracing to your code without further guidance.
+
 ## Claude Code Integration
 
 Convert Claude Code session transcripts into traqo traces — one trace per session with turns, LLM calls, tool calls, and subagent hierarchy.
