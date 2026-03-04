@@ -225,22 +225,6 @@ class TestLocalSource:
         source = LocalSource(tmp_path)
         assert len(source.list_traces()) == 1
 
-    def test_list_traces_filters_child_traces(self, tmp_path: Path):
-        """Child traces (with parent_trace metadata) should be excluded."""
-        _write_trace(tmp_path / "root.jsonl", _make_trace_events())
-        _write_trace(
-            tmp_path / "child.jsonl",
-            _make_trace_events(
-                metadata={"parent_trace": str(tmp_path / "root.jsonl")}
-            ),
-        )
-
-        source = LocalSource(tmp_path)
-        traces = source.list_traces()
-
-        assert len(traces) == 1
-        assert traces[0].key == "root.jsonl"
-
     def test_read_all(self, tmp_path: Path):
         events = _make_trace_events()
         _write_trace(tmp_path / "run.jsonl", events)
@@ -343,14 +327,12 @@ class TestS3Source:
             pytest.skip("boto3 not installed")
 
         now = datetime(2025, 6, 1, tzinfo=timezone.utc)
-        events = _make_trace_events()
         mock_client = self._make_paginator(
             [
                 {"Key": "traces/run1.jsonl", "LastModified": now},
                 {"Key": "traces/run2.jsonl", "LastModified": now},
                 {"Key": "traces/readme.txt", "LastModified": now},
             ],
-            download_events=events,
         )
 
         source = self._make_source(mock_client)
@@ -368,51 +350,12 @@ class TestS3Source:
             pytest.skip("boto3 not installed")
 
         now = datetime(2025, 6, 1, tzinfo=timezone.utc)
-        events = _make_trace_events()
         mock_client = self._make_paginator(
             [{"Key": "traces/sub/deep.jsonl", "LastModified": now}],
-            download_events=events,
         )
         source = self._make_source(mock_client)
         traces = source.list_traces()
         assert traces[0].key == "sub/deep.jsonl"
-
-    def test_list_traces_filters_children(self):
-        try:
-            from traqo.ui.sources import S3Source  # noqa: F401
-        except ImportError:
-            pytest.skip("boto3 not installed")
-
-        now = datetime(2025, 6, 1, tzinfo=timezone.utc)
-        root_events = _make_trace_events()
-        child_events = _make_trace_events(
-            metadata={"parent_trace": "/path/to/root.jsonl"}
-        )
-
-        mock_client = MagicMock()
-        mock_paginator = MagicMock()
-        mock_client.get_paginator.return_value = mock_paginator
-        mock_paginator.paginate.return_value = [
-            {
-                "Contents": [
-                    {"Key": "traces/root.jsonl", "LastModified": now},
-                    {"Key": "traces/child.jsonl", "LastModified": now},
-                ]
-            }
-        ]
-
-        def fake_download(bucket, key, dest):
-            Path(dest).parent.mkdir(parents=True, exist_ok=True)
-            events = child_events if "child" in key else root_events
-            Path(dest).write_text("\n".join(json.dumps(e) for e in events))
-
-        mock_client.download_file.side_effect = fake_download
-
-        source = self._make_source(mock_client)
-        traces = source.list_traces()
-
-        assert len(traces) == 1
-        assert traces[0].key == "root.jsonl"
 
     def test_read_all_downloads_and_caches(self, tmp_path: Path):
         try:
@@ -520,6 +463,14 @@ class TestS3Source:
         )
 
         source = self._make_source(mock_client)
+
+        # Download to cache first
+        source.read_all("run.jsonl")
+
+        # Now list should pick up cached data
+        mock_client.get_paginator.return_value.paginate.return_value = [
+            {"Contents": [{"Key": "traces/run.jsonl", "LastModified": now}]}
+        ]
         traces = source.list_traces()
         assert len(traces) == 1
         assert traces[0].input == "cached"
@@ -585,7 +536,6 @@ class TestGCSSource:
             self._make_blob("traces/run2.jsonl", now),
             self._make_blob("traces/readme.txt", now),
         ]
-        self._setup_download(mock_client, _make_trace_events())
 
         source = self._make_source(mock_client)
         traces = source.list_traces()
@@ -608,48 +558,10 @@ class TestGCSSource:
         mock_bucket.list_blobs.return_value = [
             self._make_blob("traces/sub/deep.jsonl", now),
         ]
-        self._setup_download(mock_client, _make_trace_events())
 
         source = self._make_source(mock_client)
         traces = source.list_traces()
         assert traces[0].key == "sub/deep.jsonl"
-
-    def test_list_traces_filters_children(self):
-        try:
-            from traqo.ui.sources import GCSSource  # noqa: F401
-        except ImportError:
-            pytest.skip("google-cloud-storage not installed")
-
-        now = datetime(2025, 6, 1, tzinfo=timezone.utc)
-        root_events = _make_trace_events()
-        child_events = _make_trace_events(
-            metadata={"parent_trace": "/path/to/root.jsonl"}
-        )
-
-        mock_client = MagicMock()
-        mock_bucket = MagicMock()
-        mock_client.bucket.return_value = mock_bucket
-        mock_bucket.list_blobs.return_value = [
-            self._make_blob("traces/root.jsonl", now),
-            self._make_blob("traces/child.jsonl", now),
-        ]
-
-        mock_blob = MagicMock()
-        mock_bucket.blob.return_value = mock_blob
-
-        def fake_download(dest):
-            Path(dest).parent.mkdir(parents=True, exist_ok=True)
-            # Determine which file based on dest path
-            events = child_events if "child" in str(dest) else root_events
-            Path(dest).write_text("\n".join(json.dumps(e) for e in events))
-
-        mock_blob.download_to_filename.side_effect = fake_download
-
-        source = self._make_source(mock_client)
-        traces = source.list_traces()
-
-        assert len(traces) == 1
-        assert traces[0].key == "root.jsonl"
 
     def test_read_all_downloads_and_caches(self):
         try:

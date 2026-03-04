@@ -11,7 +11,6 @@ import gzip
 import json
 import logging
 import tempfile
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -214,8 +213,6 @@ class LocalSource:
             seen_stems.add(rel_stem)
             try:
                 first, last = _read_first_last_lines(f)
-                if _is_child_trace(first):
-                    continue
                 summary = TraceSummary(
                     key=key, file=key, last_modified=f.stat().st_mtime
                 )
@@ -315,12 +312,8 @@ class S3Source:
                 self._cloud_mtimes[rel] = mtime
                 all_entries.append((rel, mtime))
 
-        # Sort so .jsonl.gz comes before .jsonl for same stem
+        # Dedup: prefer .jsonl.gz over .jsonl for same stem
         all_entries.sort(key=lambda e: (not e[0].endswith(".jsonl.gz"), e[0]))
-
-        # Cache all trace files for child filtering and enrichment
-        self._cache_trace_files([rel for rel, _ in all_entries])
-
         for rel, mtime in all_entries:
             stem = _trace_stem(rel)
             if stem in seen_stems:
@@ -333,8 +326,6 @@ class S3Source:
             if cached.is_file():
                 try:
                     first, last = _read_first_last_lines(cached)
-                    if _is_child_trace(first):
-                        continue
                     _enrich_summary(summary, first, last)
                 except Exception:
                     pass
@@ -403,22 +394,6 @@ class S3Source:
         logger.info("downloading s3://%s/%s", self._bucket, s3_key)
         self._client.download_file(self._bucket, s3_key, str(dest))
 
-    def _cache_trace_files(self, keys: list[str]) -> None:
-        """Download trace files to cache for child filtering and enrichment."""
-        to_download = [k for k in keys if not (self._cache_dir / k).is_file()]
-        if not to_download:
-            return
-        logger.info("caching %d trace files for listing", len(to_download))
-
-        def _dl(key: str) -> None:
-            try:
-                self._download(key, self._cache_dir / key)
-            except Exception:
-                logger.debug("failed to cache %s", key, exc_info=True)
-
-        with ThreadPoolExecutor(max_workers=20) as pool:
-            list(pool.map(_dl, to_download))
-
 
 # ---------------------------------------------------------------------------
 # GCSSource
@@ -462,12 +437,8 @@ class GCSSource:
             self._cloud_mtimes[rel] = mtime
             all_entries.append((rel, mtime))
 
-        # Sort so .jsonl.gz comes before .jsonl for same stem
+        # Dedup: prefer .jsonl.gz over .jsonl for same stem
         all_entries.sort(key=lambda e: (not e[0].endswith(".jsonl.gz"), e[0]))
-
-        # Cache all trace files for child filtering and enrichment
-        self._cache_trace_files([rel for rel, _ in all_entries])
-
         for rel, mtime in all_entries:
             stem = _trace_stem(rel)
             if stem in seen_stems:
@@ -480,8 +451,6 @@ class GCSSource:
             if cached.is_file():
                 try:
                     first, last = _read_first_last_lines(cached)
-                    if _is_child_trace(first):
-                        continue
                     _enrich_summary(summary, first, last)
                 except Exception:
                     pass
@@ -550,22 +519,6 @@ class GCSSource:
         logger.info("downloading gs://%s/%s", self._bucket_name, blob_name)
         blob = self._bucket.blob(blob_name)
         blob.download_to_filename(str(dest))
-
-    def _cache_trace_files(self, keys: list[str]) -> None:
-        """Download trace files to cache for child filtering and enrichment."""
-        to_download = [k for k in keys if not (self._cache_dir / k).is_file()]
-        if not to_download:
-            return
-        logger.info("caching %d trace files for listing", len(to_download))
-
-        def _dl(key: str) -> None:
-            try:
-                self._download(key, self._cache_dir / key)
-            except Exception:
-                logger.debug("failed to cache %s", key, exc_info=True)
-
-        with ThreadPoolExecutor(max_workers=20) as pool:
-            list(pool.map(_dl, to_download))
 
 
 # ---------------------------------------------------------------------------
