@@ -184,16 +184,12 @@ class LocalSource:
         trace_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
 
         # Deduplicate: if both .jsonl and .jsonl.gz exist, prefer .jsonl.gz
+        trace_files.sort(key=lambda p: (not p.name.endswith(".jsonl.gz"), p.name))
         seen_stems: set[str] = set()
         summaries: list[TraceSummary] = []
         for f in trace_files:
             key = str(f.relative_to(self._path))
-            # Normalize stem for dedup: strip .jsonl.gz or .jsonl
-            if f.name.endswith(".jsonl.gz"):
-                stem = f.name[: -len(".jsonl.gz")]
-            else:
-                stem = f.name[: -len(".jsonl")]
-            rel_stem = str(f.parent.relative_to(self._path) / stem)
+            rel_stem = _trace_stem(key)
             if rel_stem in seen_stems:
                 continue
             seen_stems.add(rel_stem)
