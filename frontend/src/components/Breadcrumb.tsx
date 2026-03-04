@@ -68,7 +68,7 @@ function buildBreadcrumb(pathname: string): Crumb[] {
     // The file part may contain slashes (directory structure)
     // We need the file name for display
     const fileParts = decoded.split("/");
-    const fileName = fileParts[fileParts.length - 1]!;
+    const fileName = fileParts[fileParts.length - 1]!.replace(/\.jsonl(?:\.gz)?$/, "");
 
     crumbs.push({ label: "traces", link: "/" });
 

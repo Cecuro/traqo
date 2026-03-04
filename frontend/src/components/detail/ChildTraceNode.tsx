@@ -70,7 +70,7 @@ export function ChildTraceNode({
           <span className="inline-block px-1.5 py-0.5 rounded bg-orange/15 text-orange text-[11px] font-medium font-mono">
             child
           </span>
-          <span className="text-[13px] font-medium truncate">{child.name}</span>
+          <span className="text-[13px] font-medium truncate">{child.name.replace(/\.jsonl(?:\.gz)?$/, "")}</span>
           {childHasErrors && (
             <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-err" title="Contains errors" />
           )}

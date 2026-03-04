@@ -7,7 +7,7 @@ export function TraceRow({ trace }: { trace: TraceSummary }) {
   const navigate = useNavigate();
   const stats = trace.stats ?? {};
   const hasErr = (stats.errors ?? 0) > 0;
-  const displayName = trace.file.split("/").pop()?.replace(/\.jsonl$/, "") ?? "";
+  const displayName = trace.file.split("/").pop()?.replace(/\.jsonl(?:\.gz)?$/, "") ?? "";
   const desc = summarizeInput(trace.input);
 
   return (
