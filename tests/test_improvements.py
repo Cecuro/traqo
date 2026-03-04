@@ -180,7 +180,7 @@ class TestChildFileField:
 
         parent_events = read_events(parent_path)
         started = [e for e in parent_events if e.get("name") == "child_started"][0]
-        assert started["data"]["child_file"] == "my_agent.jsonl"
+        assert started["data"]["child_file"] == "my_agent.jsonl.gz"
 
     def test_child_ended_has_child_file(self, tmp_path: Path):
         parent_path = tmp_path / "parent.jsonl"
@@ -193,7 +193,7 @@ class TestChildFileField:
 
         parent_events = read_events(parent_path)
         ended = [e for e in parent_events if e.get("name") == "child_ended"][0]
-        assert ended["data"]["child_file"] == "my_agent.jsonl"
+        assert ended["data"]["child_file"] == "my_agent.jsonl.gz"
 
     def test_trace_end_children_has_file(self, tmp_path: Path):
         parent_path = tmp_path / "parent.jsonl"
@@ -207,7 +207,7 @@ class TestChildFileField:
         parent_events = read_events(parent_path)
         trace_end = parent_events[-1]
         assert trace_end["type"] == "trace_end"
-        assert trace_end["children"][0]["file"] == "my_agent.jsonl"
+        assert trace_end["children"][0]["file"] == "my_agent.jsonl.gz"
 
     def test_child_file_with_default_path(self, tmp_path: Path):
         parent_path = tmp_path / "traces" / "parent.jsonl"
@@ -220,9 +220,11 @@ class TestChildFileField:
         parent_events = read_events(parent_path)
         started = [e for e in parent_events if e.get("name") == "child_started"][0]
         assert started["data"]["child_file"].startswith("agent_x_")
+        assert started["data"]["child_file"].endswith(".jsonl.gz")
 
         ended = [e for e in parent_events if e.get("name") == "child_ended"][0]
         assert ended["data"]["child_file"].startswith("agent_x_")
+        assert ended["data"]["child_file"].endswith(".jsonl.gz")
 
 
 # ---------------------------------------------------------------------------

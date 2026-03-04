@@ -154,6 +154,7 @@ class Tracer:
         self._stats_output_tokens = 0
         self._stats_cache_read_tokens = 0
         self._stats_cache_creation_tokens = 0
+        self._stats_reasoning_tokens = 0
         self._children: list[dict[str, Any]] = []
 
         # Child tracer linkage (set by child())
@@ -334,6 +335,7 @@ class Tracer:
                 self._stats_cache_creation_tokens += token_usage.get(
                     "cache_creation_tokens", 0
                 )
+                self._stats_reasoning_tokens += token_usage.get("reasoning_tokens", 0)
 
     def __enter__(self) -> Tracer:
         self._open()
@@ -379,6 +381,7 @@ class Tracer:
                 "total_output_tokens": self._stats_output_tokens,
                 "total_cache_read_tokens": self._stats_cache_read_tokens,
                 "total_cache_creation_tokens": self._stats_cache_creation_tokens,
+                "total_reasoning_tokens": self._stats_reasoning_tokens,
                 "errors": self._stats_errors,
             },
         }
@@ -575,8 +578,7 @@ class Tracer:
                 "ts": _now(),
                 "data": {
                     "child_name": name,
-                    "child_path": str(path),
-                    "child_file": path.name,
+                    "child_file": path.stem + ".jsonl.gz",
                 },
             }
         )
@@ -586,8 +588,7 @@ class Tracer:
     def _write_child_ended(self, name: str, child: Tracer) -> None:
         summary = {
             "name": name,
-            "file": child._path.name,
-            "path": str(child._path),
+            "file": child._path.stem + ".jsonl.gz",
             "duration_s": round(
                 (datetime.now(timezone.utc) - child._start_time).total_seconds(), 3
             )
@@ -596,6 +597,7 @@ class Tracer:
             "spans": child._stats_spans,
             "total_input_tokens": child._stats_input_tokens,
             "total_output_tokens": child._stats_output_tokens,
+            "total_reasoning_tokens": child._stats_reasoning_tokens,
         }
         self._children.append(summary)
         # Roll up child stats so parent trace_end.stats reflects the full tree
@@ -605,6 +607,7 @@ class Tracer:
             self._stats_output_tokens += child._stats_output_tokens
             self._stats_cache_read_tokens += child._stats_cache_read_tokens
             self._stats_cache_creation_tokens += child._stats_cache_creation_tokens
+            self._stats_reasoning_tokens += child._stats_reasoning_tokens
             self._stats_errors += child._stats_errors
             self._stats_events += 1
         self._write(
@@ -616,11 +619,12 @@ class Tracer:
                 "ts": _now(),
                 "data": {
                     "child_name": name,
-                    "child_file": child._path.name,
+                    "child_file": child._path.stem + ".jsonl.gz",
                     "duration_s": summary["duration_s"],
                     "spans": summary["spans"],
                     "total_input_tokens": summary["total_input_tokens"],
                     "total_output_tokens": summary["total_output_tokens"],
+                    "total_reasoning_tokens": summary["total_reasoning_tokens"],
                 },
             }
         )

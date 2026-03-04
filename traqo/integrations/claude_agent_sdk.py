@@ -328,12 +328,12 @@ async def traqo_agent(
             duration = (datetime.now(timezone.utc) - start_time).total_seconds()
             summary = {
                 "name": name,
-                "file": output_path.name,
-                "path": str(output_path),
+                "file": output_path.stem + ".jsonl.gz",
                 "duration_s": round(duration, 3),
                 "spans": stats.get("spans", 0),
                 "total_input_tokens": stats.get("total_input_tokens", 0),
                 "total_output_tokens": stats.get("total_output_tokens", 0),
+                "total_reasoning_tokens": stats.get("total_reasoning_tokens", 0),
             }
             parent._children.append(summary)
             with parent._lock:
@@ -346,6 +346,7 @@ async def traqo_agent(
                 parent._stats_cache_creation_tokens += stats.get(
                     "total_cache_creation_tokens", 0
                 )
+                parent._stats_reasoning_tokens += stats.get("total_reasoning_tokens", 0)
                 parent._stats_errors += stats.get("errors", 0)
                 parent._stats_events += 1
             parent.write_event(
@@ -356,11 +357,12 @@ async def traqo_agent(
                     "ts": datetime.now(timezone.utc).isoformat(),
                     "data": {
                         "child_name": name,
-                        "child_file": output_path.name,
+                        "child_file": output_path.stem + ".jsonl.gz",
                         "duration_s": summary["duration_s"],
                         "spans": summary["spans"],
                         "total_input_tokens": summary["total_input_tokens"],
                         "total_output_tokens": summary["total_output_tokens"],
+                        "total_reasoning_tokens": summary["total_reasoning_tokens"],
                     },
                 }
             )

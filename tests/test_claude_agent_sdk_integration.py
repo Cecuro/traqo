@@ -8,10 +8,22 @@ from typing import Any
 
 import pytest
 
-from tests.conftest import read_events
-from traqo import Tracer
-from traqo.cc_sync import AssistantMessage, ParsedSession, Turn, generate_trace_events
-from traqo.integrations.claude_agent_sdk import _read_trace_end_stats, traqo_agent
+claude_agent_sdk = pytest.importorskip(
+    "claude_agent_sdk", reason="claude-agent-sdk not installed"
+)
+
+from tests.conftest import read_events  # noqa: E402
+from traqo import Tracer  # noqa: E402
+from traqo.cc_sync import (  # noqa: E402
+    AssistantMessage,
+    ParsedSession,
+    Turn,
+    generate_trace_events,
+)
+from traqo.integrations.claude_agent_sdk import (  # noqa: E402
+    _read_trace_end_stats,
+    traqo_agent,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers

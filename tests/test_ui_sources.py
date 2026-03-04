@@ -14,6 +14,7 @@ from traqo.ui.sources import (
     LocalSource,
     TraceSummary,
     _enrich_summary,
+    _resolve_cloud_key,
     parse_source,
 )
 
@@ -36,15 +37,19 @@ def _make_trace_events(
     tags: list[str] | None = None,
     duration: float = 1.5,
     stats: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Create minimal trace_start + trace_end events."""
+    first: dict[str, Any] = {
+        "type": "trace_start",
+        "ts": "2025-01-01T00:00:00Z",
+        "input": input_val,
+        "tags": tags or [],
+    }
+    if metadata:
+        first["metadata"] = metadata
     return [
-        {
-            "type": "trace_start",
-            "ts": "2025-01-01T00:00:00Z",
-            "input": input_val,
-            "tags": tags or [],
-        },
+        first,
         {
             "type": "trace_end",
             "duration_s": duration,
@@ -112,6 +117,41 @@ class TestEnrichSummary:
 
 
 # ---------------------------------------------------------------------------
+# _resolve_cloud_key
+# ---------------------------------------------------------------------------
+
+
+class TestResolveCloudKey:
+    def test_exact_match(self):
+        known = {"run.jsonl": 1.0}
+        assert _resolve_cloud_key("run.jsonl", known) == "run.jsonl"
+
+    def test_jsonl_to_gz(self):
+        known = {"run.jsonl.gz": 1.0}
+        assert _resolve_cloud_key("run.jsonl", known) == "run.jsonl.gz"
+
+    def test_gz_to_jsonl(self):
+        known = {"run.jsonl": 1.0}
+        assert _resolve_cloud_key("run.jsonl.gz", known) == "run.jsonl"
+
+    def test_prefers_gz(self):
+        known = {"run.jsonl.gz": 1.0, "run.jsonl": 1.0}
+        assert _resolve_cloud_key("run.jsonl", known) == "run.jsonl"
+        # If requesting .jsonl.gz, exact match wins
+        assert _resolve_cloud_key("run.jsonl.gz", known) == "run.jsonl.gz"
+
+    def test_unknown_key(self):
+        known = {"other.jsonl": 1.0}
+        assert _resolve_cloud_key("run.jsonl", known) == "run.jsonl"
+
+    def test_nested_path(self):
+        known = {"sub/dir/trace.jsonl.gz": 1.0}
+        assert (
+            _resolve_cloud_key("sub/dir/trace.jsonl", known) == "sub/dir/trace.jsonl.gz"
+        )
+
+
+# ---------------------------------------------------------------------------
 # LocalSource
 # ---------------------------------------------------------------------------
 
@@ -173,6 +213,22 @@ class TestLocalSource:
         source = LocalSource(tmp_path)
         assert source.read_all("../../etc/passwd") == []
 
+    def test_read_all_resolves_extension(self, tmp_path: Path):
+        """Requesting .jsonl should find .jsonl.gz and vice versa."""
+        import gzip as gzip_mod
+
+        events = _make_trace_events()
+        gz = tmp_path / "trace.jsonl.gz"
+        with gzip_mod.open(gz, "wt", encoding="utf-8") as f:
+            for ev in events:
+                f.write(json.dumps(ev) + "\n")
+
+        source = LocalSource(tmp_path)
+        # Request by .jsonl but only .jsonl.gz exists
+        result = source.read_all("trace.jsonl")
+        assert len(result) == 2
+        assert result[0]["type"] == "trace_start"
+
     def test_read_first_last(self, tmp_path: Path):
         _write_trace(tmp_path / "run.jsonl", _make_trace_events())
         source = LocalSource(tmp_path)
@@ -198,6 +254,17 @@ class TestLocalSource:
 # ---------------------------------------------------------------------------
 
 
+def _s3_fake_download(events: list[dict[str, Any]]):
+    """Create a fake S3 download_file side_effect."""
+    content = "\n".join(json.dumps(e) for e in events)
+
+    def fake(bucket, key, dest):
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest).write_text(content)
+
+    return fake
+
+
 class TestS3Source:
     def _make_source(
         self, mock_client: MagicMock, bucket: str = "b", prefix: str = "traces/"
@@ -206,12 +273,19 @@ class TestS3Source:
 
         return S3Source(bucket, prefix, boto3_client=mock_client)
 
-    def _make_paginator(self, objects: list[dict[str, Any]]) -> MagicMock:
+    def _make_paginator(
+        self,
+        objects: list[dict[str, Any]],
+        *,
+        download_events: list[dict[str, Any]] | None = None,
+    ) -> MagicMock:
         """Create a mock paginator returning a single page of objects."""
         mock_client = MagicMock()
         mock_paginator = MagicMock()
         mock_client.get_paginator.return_value = mock_paginator
         mock_paginator.paginate.return_value = [{"Contents": objects}]
+        if download_events is not None:
+            mock_client.download_file.side_effect = _s3_fake_download(download_events)
         return mock_client
 
     def test_import_guard(self):
@@ -232,7 +306,7 @@ class TestS3Source:
                 {"Key": "traces/run1.jsonl", "LastModified": now},
                 {"Key": "traces/run2.jsonl", "LastModified": now},
                 {"Key": "traces/readme.txt", "LastModified": now},
-            ]
+            ],
         )
 
         source = self._make_source(mock_client)
@@ -251,9 +325,7 @@ class TestS3Source:
 
         now = datetime(2025, 6, 1, tzinfo=timezone.utc)
         mock_client = self._make_paginator(
-            [
-                {"Key": "traces/sub/deep.jsonl", "LastModified": now},
-            ]
+            [{"Key": "traces/sub/deep.jsonl", "LastModified": now}],
         )
         source = self._make_source(mock_client)
         traces = source.list_traces()
@@ -266,14 +338,8 @@ class TestS3Source:
             pytest.skip("boto3 not installed")
 
         events = _make_trace_events()
-        content = "\n".join(json.dumps(e) for e in events)
-
         mock_client = MagicMock()
-
-        def fake_download(bucket, key, dest):
-            Path(dest).write_text(content)
-
-        mock_client.download_file.side_effect = fake_download
+        mock_client.download_file.side_effect = _s3_fake_download(events)
 
         source = self._make_source(mock_client)
         result = source.read_all("run.jsonl")
@@ -291,34 +357,48 @@ class TestS3Source:
             pytest.skip("boto3 not installed")
 
         events = _make_trace_events()
-        content = "\n".join(json.dumps(e) for e in events)
-
         mock_client = MagicMock()
-
-        def fake_download(bucket, key, dest):
-            Path(dest).write_text(content)
-
-        mock_client.download_file.side_effect = fake_download
+        mock_client.download_file.side_effect = _s3_fake_download(events)
 
         source = self._make_source(mock_client)
-        # Simulate cloud mtime in the past so cache is valid
         source._cloud_mtimes["run.jsonl"] = 0.0
 
-        # First call downloads
         source.read_all("run.jsonl")
         assert mock_client.download_file.call_count == 1
 
-        # Second call uses cache (file mtime >= cloud mtime of 0.0)
         source.read_all("run.jsonl")
         assert mock_client.download_file.call_count == 1
 
-    def test_read_first_last_returns_none_before_download(self):
+    def test_read_all_resolves_extension(self):
+        """Requesting .jsonl should resolve to .jsonl.gz if that's what exists."""
+        try:
+            from traqo.ui.sources import S3Source  # noqa: F401
+        except ImportError:
+            pytest.skip("boto3 not installed")
+
+        events = _make_trace_events()
+        mock_client = MagicMock()
+        mock_client.download_file.side_effect = _s3_fake_download(events)
+
+        source = self._make_source(mock_client)
+        # Register the .gz key as known
+        source._cloud_mtimes["run.jsonl.gz"] = 1.0
+
+        result = source.read_all("run.jsonl")
+        assert len(result) == 2
+        # Should have downloaded run.jsonl.gz, not run.jsonl
+        call_args = mock_client.download_file.call_args
+        assert "run.jsonl.gz" in call_args[0][1]
+
+    def test_read_first_last_returns_none_on_download_failure(self):
         try:
             from traqo.ui.sources import S3Source  # noqa: F401
         except ImportError:
             pytest.skip("boto3 not installed")
 
         mock_client = MagicMock()
+        mock_client.download_file.side_effect = Exception("not found")
+
         source = self._make_source(mock_client)
         first, last = source.read_first_last("run.jsonl")
         assert first is None
@@ -331,14 +411,8 @@ class TestS3Source:
             pytest.skip("boto3 not installed")
 
         events = _make_trace_events()
-        content = "\n".join(json.dumps(e) for e in events)
-
         mock_client = MagicMock()
-
-        def fake_download(bucket, key, dest):
-            Path(dest).write_text(content)
-
-        mock_client.download_file.side_effect = fake_download
+        mock_client.download_file.side_effect = _s3_fake_download(events)
 
         source = self._make_source(mock_client)
         source.read_all("run.jsonl")
@@ -358,16 +432,9 @@ class TestS3Source:
         events = _make_trace_events(input_val="cached", duration=5.0)
         now = datetime(2025, 6, 1, tzinfo=timezone.utc)
         mock_client = self._make_paginator(
-            [
-                {"Key": "traces/run.jsonl", "LastModified": now},
-            ]
+            [{"Key": "traces/run.jsonl", "LastModified": now}],
+            download_events=events,
         )
-
-        def fake_download(bucket, key, dest):
-            Path(dest).parent.mkdir(parents=True, exist_ok=True)
-            Path(dest).write_text("\n".join(json.dumps(e) for e in events))
-
-        mock_client.download_file.side_effect = fake_download
 
         source = self._make_source(mock_client)
 
@@ -389,6 +456,17 @@ class TestS3Source:
 # ---------------------------------------------------------------------------
 
 
+def _gcs_fake_download(events: list[dict[str, Any]]):
+    """Create a fake GCS download_to_filename side_effect."""
+    content = "\n".join(json.dumps(e) for e in events)
+
+    def fake(dest):
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest).write_text(content)
+
+    return fake
+
+
 class TestGCSSource:
     def _make_source(
         self, mock_client: MagicMock, bucket: str = "b", prefix: str = "traces/"
@@ -402,6 +480,14 @@ class TestGCSSource:
         blob.name = name
         blob.updated = updated
         return blob
+
+    def _setup_download(self, mock_client: MagicMock, events: list[dict[str, Any]]):
+        """Set up blob download mock on the client's bucket."""
+        mock_bucket = mock_client.bucket.return_value
+        mock_blob = MagicMock()
+        mock_bucket.blob.return_value = mock_blob
+        mock_blob.download_to_filename.side_effect = _gcs_fake_download(events)
+        return mock_blob
 
     def test_import_guard(self):
         try:
@@ -458,19 +544,10 @@ class TestGCSSource:
             pytest.skip("google-cloud-storage not installed")
 
         events = _make_trace_events()
-        content = "\n".join(json.dumps(e) for e in events)
-
         mock_client = MagicMock()
         mock_bucket = MagicMock()
         mock_client.bucket.return_value = mock_bucket
-        mock_blob = MagicMock()
-        mock_bucket.blob.return_value = mock_blob
-
-        def fake_download(dest):
-            Path(dest).parent.mkdir(parents=True, exist_ok=True)
-            Path(dest).write_text(content)
-
-        mock_blob.download_to_filename.side_effect = fake_download
+        mock_blob = self._setup_download(mock_client, events)
 
         source = self._make_source(mock_client)
         result = source.read_all("run.jsonl")
@@ -487,19 +564,10 @@ class TestGCSSource:
             pytest.skip("google-cloud-storage not installed")
 
         events = _make_trace_events()
-        content = "\n".join(json.dumps(e) for e in events)
-
         mock_client = MagicMock()
         mock_bucket = MagicMock()
         mock_client.bucket.return_value = mock_bucket
-        mock_blob = MagicMock()
-        mock_bucket.blob.return_value = mock_blob
-
-        def fake_download(dest):
-            Path(dest).parent.mkdir(parents=True, exist_ok=True)
-            Path(dest).write_text(content)
-
-        mock_blob.download_to_filename.side_effect = fake_download
+        mock_blob = self._setup_download(mock_client, events)
 
         source = self._make_source(mock_client)
         source._cloud_mtimes["run.jsonl"] = 0.0
@@ -510,7 +578,27 @@ class TestGCSSource:
         source.read_all("run.jsonl")
         assert mock_blob.download_to_filename.call_count == 1
 
-    def test_read_first_last_returns_none_before_download(self):
+    def test_read_all_resolves_extension(self):
+        """Requesting .jsonl should resolve to .jsonl.gz if that's what exists."""
+        try:
+            from traqo.ui.sources import GCSSource  # noqa: F401
+        except ImportError:
+            pytest.skip("google-cloud-storage not installed")
+
+        events = _make_trace_events()
+        mock_client = MagicMock()
+        mock_bucket = MagicMock()
+        mock_client.bucket.return_value = mock_bucket
+        self._setup_download(mock_client, events)
+
+        source = self._make_source(mock_client)
+        source._cloud_mtimes["run.jsonl.gz"] = 1.0
+
+        result = source.read_all("run.jsonl")
+        assert len(result) == 2
+        mock_bucket.blob.assert_called_with("traces/run.jsonl.gz")
+
+    def test_read_first_last_returns_none_on_download_failure(self):
         try:
             from traqo.ui.sources import GCSSource  # noqa: F401
         except ImportError:
@@ -519,6 +607,9 @@ class TestGCSSource:
         mock_client = MagicMock()
         mock_bucket = MagicMock()
         mock_client.bucket.return_value = mock_bucket
+        mock_blob = MagicMock()
+        mock_bucket.blob.return_value = mock_blob
+        mock_blob.download_to_filename.side_effect = Exception("not found")
 
         source = self._make_source(mock_client)
         first, last = source.read_first_last("run.jsonl")
@@ -532,19 +623,10 @@ class TestGCSSource:
             pytest.skip("google-cloud-storage not installed")
 
         events = _make_trace_events()
-        content = "\n".join(json.dumps(e) for e in events)
-
         mock_client = MagicMock()
         mock_bucket = MagicMock()
         mock_client.bucket.return_value = mock_bucket
-        mock_blob = MagicMock()
-        mock_bucket.blob.return_value = mock_blob
-
-        def fake_download(dest):
-            Path(dest).parent.mkdir(parents=True, exist_ok=True)
-            Path(dest).write_text(content)
-
-        mock_blob.download_to_filename.side_effect = fake_download
+        self._setup_download(mock_client, events)
 
         source = self._make_source(mock_client)
         source.read_all("run.jsonl")
@@ -613,3 +695,147 @@ class TestParseSource:
     def test_relative_local_path(self):
         source = parse_source(".")
         assert isinstance(source, LocalSource)
+
+
+# ---------------------------------------------------------------------------
+# _open_jsonl magic-bytes check
+# ---------------------------------------------------------------------------
+
+
+class TestOpenJsonl:
+    """Test that _open_jsonl checks gzip magic bytes, not just extension."""
+
+    def test_gz_extension_with_gzip_content(self, tmp_path: Path):
+        """A real .gz file should be opened with gzip."""
+        import gzip as gzip_mod
+
+        from traqo.ui.sources import _open_jsonl
+
+        path = tmp_path / "trace.jsonl.gz"
+        with gzip_mod.open(path, "wt", encoding="utf-8") as f:
+            f.write('{"type": "trace_start"}\n')
+
+        with _open_jsonl(path) as f:
+            line = f.readline().strip()
+        assert '"trace_start"' in line
+
+    def test_gz_extension_with_plain_content(self, tmp_path: Path):
+        """A .gz file that's actually plain text (GCS transparent decompression)."""
+        from traqo.ui.sources import _open_jsonl
+
+        path = tmp_path / "trace.jsonl.gz"
+        path.write_text('{"type": "trace_start"}\n')
+
+        with _open_jsonl(path) as f:
+            line = f.readline().strip()
+        assert '"trace_start"' in line
+
+    def test_plain_jsonl(self, tmp_path: Path):
+        """A regular .jsonl file."""
+        from traqo.ui.sources import _open_jsonl
+
+        path = tmp_path / "trace.jsonl"
+        path.write_text('{"type": "trace_start"}\n')
+
+        with _open_jsonl(path) as f:
+            line = f.readline().strip()
+        assert '"trace_start"' in line
+
+
+# ---------------------------------------------------------------------------
+# _trace_stem and dedup helpers
+# ---------------------------------------------------------------------------
+
+
+class TestTraceStem:
+    def test_jsonl_gz(self):
+        from traqo.ui.sources import _trace_stem
+
+        assert _trace_stem("foo.jsonl.gz") == "foo"
+
+    def test_jsonl(self):
+        from traqo.ui.sources import _trace_stem
+
+        assert _trace_stem("foo.jsonl") == "foo"
+
+    def test_nested_path(self):
+        from traqo.ui.sources import _trace_stem
+
+        assert _trace_stem("sub/dir/trace.jsonl.gz") == "sub/dir/trace"
+
+    def test_other_extension(self):
+        from traqo.ui.sources import _trace_stem
+
+        assert _trace_stem("file.txt") == "file.txt"
+
+
+class TestLocalSourceDedup:
+    """LocalSource should deduplicate .jsonl and .jsonl.gz with same stem."""
+
+    def test_prefers_gz_over_raw(self, tmp_path: Path):
+        import gzip as gzip_mod
+
+        events = _make_trace_events()
+
+        # Write both raw and compressed
+        raw = tmp_path / "trace.jsonl"
+        _write_trace(raw, events)
+        gz = tmp_path / "trace.jsonl.gz"
+        with gzip_mod.open(gz, "wt", encoding="utf-8") as f:
+            for ev in events:
+                f.write(json.dumps(ev) + "\n")
+
+        source = LocalSource(tmp_path)
+        traces = source.list_traces()
+
+        assert len(traces) == 1
+        assert traces[0].key.endswith(".jsonl.gz")
+
+    def test_excludes_content_files(self, tmp_path: Path):
+        events = _make_trace_events()
+        _write_trace(tmp_path / "trace.jsonl", events)
+        # Create a content sidecar — should not appear in listing
+        (tmp_path / "trace.content.jsonl.zst").write_bytes(b"fake")
+
+        source = LocalSource(tmp_path)
+        traces = source.list_traces()
+
+        assert len(traces) == 1
+        assert not any("content" in t.key for t in traces)
+
+
+class TestLocalSourceReadContent:
+    """LocalSource.read_content should find externalized span inputs."""
+
+    def test_read_content_roundtrip(self, tmp_path: Path):
+        from traqo.compress import split_and_compress
+
+        large_input = {"messages": [{"content": "x" * 20000}]}
+        events = [
+            {"type": "trace_start", "ts": "t"},
+            {
+                "type": "span_start",
+                "id": "s1",
+                "name": "test",
+                "kind": "llm",
+                "ts": "t",
+                "input": large_input,
+            },
+            {"type": "span_end", "id": "s1", "name": "test", "status": "ok"},
+            {"type": "trace_end", "ts": "t"},
+        ]
+        _write_trace(tmp_path / "trace.jsonl", events)
+        main_path, content_path = split_and_compress(tmp_path / "trace.jsonl")
+        assert content_path is not None
+
+        source = LocalSource(tmp_path)
+        result = source.read_content(main_path.name, "s1")
+        assert result == large_input
+
+    def test_read_content_returns_none_for_no_content_file(self, tmp_path: Path):
+        events = _make_trace_events()
+        _write_trace(tmp_path / "trace.jsonl", events)
+
+        source = LocalSource(tmp_path)
+        result = source.read_content("trace.jsonl", "nonexistent")
+        assert result is None

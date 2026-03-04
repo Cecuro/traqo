@@ -98,5 +98,9 @@ pyrightconfig.json
 # Frontend build output (built in CI, not committed)
 traqo/ui/static/
 
+# One-off scripts working directory
+_convert_work/
+scripts/
+
 # Frontend dependencies
 frontend/node_modules/

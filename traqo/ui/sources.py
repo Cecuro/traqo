@@ -1,8 +1,8 @@
 """Trace sources for the UI server.
 
 Abstracts reading traces from local directories, S3, or GCS.
-Cloud sources use a local temp-dir cache: listing is instant from the API,
-full file content is downloaded on first access and served from cache thereafter.
+Cloud sources download all trace files to a local cache on first listing
+for child-trace filtering and summary enrichment.
 """
 
 from __future__ import annotations
@@ -64,14 +64,22 @@ class TraceSource(Protocol):
 
 
 # ---------------------------------------------------------------------------
-# Helpers (moved from server.py)
+# Helpers
 # ---------------------------------------------------------------------------
 
 
 def _open_jsonl(path: Path):
-    """Open a JSONL file, transparently handling .gz compression."""
+    """Open a JSONL file, transparently handling .gz compression.
+
+    Checks magic bytes rather than just the extension, because GCS
+    transparent decompression may serve already-decompressed content
+    for files uploaded with ``Content-Encoding: gzip``.
+    """
     if path.name.endswith(".gz"):
-        return gzip.open(path, "rt", encoding="utf-8")
+        with open(path, "rb") as f:
+            magic = f.read(2)
+        if magic == b"\x1f\x8b":  # gzip magic bytes
+            return gzip.open(path, "rt", encoding="utf-8")
     return open(path, encoding="utf-8")
 
 
@@ -130,6 +138,18 @@ def _is_trace_file(name: str) -> bool:
     return name.endswith(".jsonl") or name.endswith(".jsonl.gz")
 
 
+def _trace_stem(key: str) -> str:
+    """Normalize a trace key to its stem for dedup.
+
+    ``"foo.jsonl.gz"`` and ``"foo.jsonl"`` both return ``"foo"``.
+    """
+    if key.endswith(".jsonl.gz"):
+        return key[: -len(".jsonl.gz")]
+    if key.endswith(".jsonl"):
+        return key[: -len(".jsonl")]
+    return key
+
+
 def _enrich_summary(
     summary: TraceSummary, first: dict[str, Any] | None, last: dict[str, Any] | None
 ) -> None:
@@ -144,6 +164,18 @@ def _enrich_summary(
         summary.stats = last.get("stats", {})
 
 
+def _resolve_cloud_key(key: str, known_keys: dict[str, float]) -> str:
+    """Resolve a key to an actual cloud key, trying alternate extensions."""
+    if key in known_keys:
+        return key
+    stem = _trace_stem(key)
+    for ext in (".jsonl.gz", ".jsonl"):
+        alt = stem + ext
+        if alt in known_keys:
+            return alt
+    return key
+
+
 # ---------------------------------------------------------------------------
 # LocalSource
 # ---------------------------------------------------------------------------
@@ -156,7 +188,6 @@ class LocalSource:
         self._path = path.resolve()
 
     def list_traces(self) -> list[TraceSummary]:
-        # Collect both *.jsonl and *.jsonl.gz, excluding *.content.jsonl.zst
         trace_files: list[Path] = []
         for f in self._path.rglob("*"):
             if f.is_file() and _is_trace_file(f.name):
@@ -164,16 +195,12 @@ class LocalSource:
         trace_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
 
         # Deduplicate: if both .jsonl and .jsonl.gz exist, prefer .jsonl.gz
+        trace_files.sort(key=lambda p: (not p.name.endswith(".jsonl.gz"), p.name))
         seen_stems: set[str] = set()
         summaries: list[TraceSummary] = []
         for f in trace_files:
             key = str(f.relative_to(self._path))
-            # Normalize stem for dedup: strip .jsonl.gz or .jsonl
-            if f.name.endswith(".jsonl.gz"):
-                stem = f.name[: -len(".jsonl.gz")]
-            else:
-                stem = f.name[: -len(".jsonl")]
-            rel_stem = str(f.parent.relative_to(self._path) / stem)
+            rel_stem = _trace_stem(key)
             if rel_stem in seen_stems:
                 continue
             seen_stems.add(rel_stem)
@@ -186,28 +213,41 @@ class LocalSource:
                 summaries.append(summary)
             except Exception:
                 continue
+        summaries.sort(key=lambda s: s.last_modified or 0, reverse=True)
         return summaries
+
+    def _resolve_path(self, key: str) -> Path | None:
+        """Resolve key to file path, trying alternate extensions."""
+        target = (self._path / key).resolve()
+        if self._is_safe_path(target) and target.is_file():
+            return target
+        stem = _trace_stem(key)
+        for ext in (".jsonl.gz", ".jsonl"):
+            alt = (self._path / (stem + ext)).resolve()
+            if self._is_safe_path(alt) and alt.is_file():
+                return alt
+        return None
 
     def read_first_last(
         self, key: str
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-        target = (self._path / key).resolve()
-        if not self._is_safe_path(target):
-            return None, None
-        if not target.is_file():
+        target = self._resolve_path(key)
+        if target is None:
             return None, None
         return _read_first_last_lines(target)
 
     def read_all(self, key: str) -> list[dict[str, Any]]:
-        target = (self._path / key).resolve()
-        if not self._is_safe_path(target):
-            return []
-        if not target.is_file():
+        target = self._resolve_path(key)
+        if target is None:
             return []
         return _read_jsonl(target)
 
     def read_content(self, key: str, span_id: str) -> Any | None:
-        content_rel = _content_key(key)
+        resolved = self._resolve_path(key)
+        if resolved is None:
+            return None
+        resolved_key = str(resolved.relative_to(self._path))
+        content_rel = _content_key(resolved_key)
         if content_rel is None:
             return None
         target = (self._path / content_rel).resolve()
@@ -249,12 +289,13 @@ class S3Source:
                 ) from err
             self._client = boto3.client("s3")
         self._cache_dir = Path(tempfile.mkdtemp(prefix="traqo-s3-"))
-        # key -> last_modified epoch from cloud listing
         self._cloud_mtimes: dict[str, float] = {}
 
     def list_traces(self) -> list[TraceSummary]:
         summaries: list[TraceSummary] = []
+        seen_stems: set[str] = set()
         paginator = self._client.get_paginator("list_objects_v2")
+        all_entries: list[tuple[str, float]] = []
         for page in paginator.paginate(Bucket=self._bucket, Prefix=self._prefix):
             for obj in page.get("Contents", []):
                 obj_key: str = obj["Key"]
@@ -263,21 +304,28 @@ class S3Source:
                     continue
                 mtime = obj["LastModified"].timestamp()
                 self._cloud_mtimes[rel] = mtime
+                all_entries.append((rel, mtime))
 
-                summary = TraceSummary(key=rel, file=rel, last_modified=mtime)
+        # Dedup: prefer .jsonl.gz over .jsonl for same stem
+        all_entries.sort(key=lambda e: (not e[0].endswith(".jsonl.gz"), e[0]))
+        for rel, mtime in all_entries:
+            stem = _trace_stem(rel)
+            if stem in seen_stems:
+                continue
+            seen_stems.add(stem)
 
-                # Enrich from cache if available
-                cached = self._cache_dir / rel
-                if cached.is_file():
-                    try:
-                        first, last = _read_first_last_lines(cached)
-                        _enrich_summary(summary, first, last)
-                    except Exception:
-                        pass
+            summary = TraceSummary(key=rel, file=rel, last_modified=mtime)
 
-                summaries.append(summary)
+            cached = self._cache_dir / rel
+            if cached.is_file():
+                try:
+                    first, last = _read_first_last_lines(cached)
+                    _enrich_summary(summary, first, last)
+                except Exception:
+                    pass
 
-        # Sort by last_modified descending
+            summaries.append(summary)
+
         summaries.sort(key=lambda s: s.last_modified or 0, reverse=True)
         logger.info(
             "listed %d traces from s3://%s/%s",
@@ -290,12 +338,17 @@ class S3Source:
     def read_first_last(
         self, key: str
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        key = _resolve_cloud_key(key, self._cloud_mtimes)
         cached = self._cache_dir / key
-        if cached.is_file():
-            return _read_first_last_lines(cached)
-        return None, None
+        if not cached.is_file():
+            try:
+                self._download(key, cached)
+            except Exception:
+                return None, None
+        return _read_first_last_lines(cached)
 
     def read_all(self, key: str) -> list[dict[str, Any]]:
+        key = _resolve_cloud_key(key, self._cloud_mtimes)
         cached = self._cache_dir / key
         need_download = True
 
@@ -310,6 +363,7 @@ class S3Source:
         return _read_jsonl(cached)
 
     def read_content(self, key: str, span_id: str) -> Any | None:
+        key = _resolve_cloud_key(key, self._cloud_mtimes)
         content_rel = _content_key(key)
         if content_rel is None:
             return None
@@ -365,6 +419,8 @@ class GCSSource:
 
     def list_traces(self) -> list[TraceSummary]:
         summaries: list[TraceSummary] = []
+        seen_stems: set[str] = set()
+        all_entries: list[tuple[str, float]] = []
         blobs = self._bucket.list_blobs(prefix=self._prefix or None)
         for blob in blobs:
             name: str = blob.name
@@ -373,6 +429,15 @@ class GCSSource:
                 continue
             mtime = blob.updated.timestamp() if blob.updated else 0.0
             self._cloud_mtimes[rel] = mtime
+            all_entries.append((rel, mtime))
+
+        # Dedup: prefer .jsonl.gz over .jsonl for same stem
+        all_entries.sort(key=lambda e: (not e[0].endswith(".jsonl.gz"), e[0]))
+        for rel, mtime in all_entries:
+            stem = _trace_stem(rel)
+            if stem in seen_stems:
+                continue
+            seen_stems.add(stem)
 
             summary = TraceSummary(key=rel, file=rel, last_modified=mtime)
 
@@ -398,12 +463,17 @@ class GCSSource:
     def read_first_last(
         self, key: str
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        key = _resolve_cloud_key(key, self._cloud_mtimes)
         cached = self._cache_dir / key
-        if cached.is_file():
-            return _read_first_last_lines(cached)
-        return None, None
+        if not cached.is_file():
+            try:
+                self._download(key, cached)
+            except Exception:
+                return None, None
+        return _read_first_last_lines(cached)
 
     def read_all(self, key: str) -> list[dict[str, Any]]:
+        key = _resolve_cloud_key(key, self._cloud_mtimes)
         cached = self._cache_dir / key
         need_download = True
 
@@ -418,6 +488,7 @@ class GCSSource:
         return _read_jsonl(cached)
 
     def read_content(self, key: str, span_id: str) -> Any | None:
+        key = _resolve_cloud_key(key, self._cloud_mtimes)
         content_rel = _content_key(key)
         if content_rel is None:
             return None

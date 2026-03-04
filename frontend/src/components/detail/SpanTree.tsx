@@ -25,10 +25,13 @@ export function SpanTree({ parsedTrace, selectedSpanId, onSelect }: Props) {
   const dur = t1 - t0 || 1;
 
   // Build parent-child tree
+  // Spans whose parent_id doesn't match any span in this file are treated as roots
+  // (parent may be in a different trace file)
+  const spanIds = new Set(spans.map((s) => s.id));
   const roots: ParsedSpan[] = [];
   const children = new Map<string, ParsedSpan[]>();
   for (const s of spans) {
-    if (!s.parent_id) {
+    if (!s.parent_id || !spanIds.has(s.parent_id)) {
       roots.push(s);
     } else {
       const arr = children.get(s.parent_id) ?? [];

@@ -119,7 +119,8 @@ class TestChildTracer:
         assert trace_end["type"] == "trace_end"
         assert len(trace_end["children"]) == 1
         assert trace_end["children"][0]["name"] == "agent_a"
-        assert trace_end["children"][0]["path"] == str(child_path)
+        assert trace_end["children"][0]["file"] == "child.jsonl.gz"
+        assert "path" not in trace_end["children"][0]
 
     def test_capture_content_inherited_by_child(self, tmp_path: Path):
         parent_path = tmp_path / "parent.jsonl"

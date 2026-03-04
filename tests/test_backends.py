@@ -385,10 +385,11 @@ class TestGCSBackend:
             pass
 
         flush_backends()
-        mock_bucket.blob.assert_called_once_with(f"traces/{trace_file.name}")
-        mock_blob.upload_from_filename.assert_called_once_with(
-            str(trace_file), content_type="application/x-ndjson"
-        )
+        # Tracer compresses to .jsonl.gz before uploading
+        blob_calls = mock_bucket.blob.call_args_list
+        assert any("traces/" in str(c) and ".jsonl.gz" in str(c) for c in blob_calls)
+        upload_calls = mock_blob.upload_from_filename.call_args_list
+        assert any("application/gzip" in str(c) for c in upload_calls)
 
     def test_custom_blob_name_fn(self, trace_file):
         try:
@@ -412,7 +413,9 @@ class TestGCSBackend:
             pass
 
         flush_backends()
-        mock_bucket.blob.assert_called_once_with(f"custom/{trace_file.name}")
+        # blob_name_fn receives the compressed path (.jsonl.gz)
+        blob_calls = mock_bucket.blob.call_args_list
+        assert any("custom/" in str(c) and ".jsonl.gz" in str(c) for c in blob_calls)
 
     def test_satisfies_protocol(self):
         try:

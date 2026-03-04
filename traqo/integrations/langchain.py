@@ -221,7 +221,7 @@ class TraqoCallback(BaseCallbackHandler):
         serialized: dict[str, Any] | None, fallback: str, **kwargs: Any
     ) -> str:
         """Extract a span name, preferring kwargs['name'] (LangChain v0.3+)."""
-        if "name" in kwargs:
+        if kwargs.get("name"):
             return kwargs["name"]
         if serialized is not None:
             id_parts = serialized.get("id", [])
@@ -235,7 +235,7 @@ class TraqoCallback(BaseCallbackHandler):
     def _extract_model_from_serialized(
         self, serialized: dict[str, Any] | None, **kwargs: Any
     ) -> str:
-        if "name" in kwargs:
+        if kwargs.get("name"):
             return kwargs["name"]
         if serialized is not None:
             ser_kwargs = serialized.get("kwargs", {})
@@ -296,12 +296,19 @@ class TraqoCallback(BaseCallbackHandler):
                 if key in invocation_params and invocation_params[key] is not None:
                     model_params[key] = invocation_params[key]
             if model_params:
-                meta["model_params"] = model_params
+                meta["model_parameters"] = model_params
 
         # Merge LangChain metadata from kwargs
         lc_metadata = kwargs.get("metadata")
         if lc_metadata:
             meta.update(lc_metadata)
+            # Normalize LangChain's ls_model_name → model
+            ls_model = meta.pop("ls_model_name", None)
+            if ls_model and not meta.get("model"):
+                meta["model"] = ls_model
+
+        # Resolve final model name: prefer metadata (may have been fixed above)
+        model = meta.get("model") or model
 
         start_event: dict[str, Any] = {
             "type": "span_start",
@@ -369,12 +376,19 @@ class TraqoCallback(BaseCallbackHandler):
                 if key in invocation_params and invocation_params[key] is not None:
                     model_params[key] = invocation_params[key]
             if model_params:
-                meta["model_params"] = model_params
+                meta["model_parameters"] = model_params
 
         # Merge LangChain metadata from kwargs
         lc_metadata = kwargs.get("metadata")
         if lc_metadata:
             meta.update(lc_metadata)
+            # Normalize LangChain's ls_model_name → model
+            ls_model = meta.pop("ls_model_name", None)
+            if ls_model and not meta.get("model"):
+                meta["model"] = ls_model
+
+        # Resolve final model name: prefer metadata (may have been fixed above)
+        model = meta.get("model") or model
 
         start_event: dict[str, Any] = {
             "type": "span_start",
@@ -497,7 +511,7 @@ class TraqoCallback(BaseCallbackHandler):
             if info and "ttft_recorded" not in info:
                 info["ttft_recorded"] = True
                 ttft = (datetime.now(timezone.utc) - info["start"]).total_seconds()
-                info["metadata"]["ttft_s"] = round(ttft, 3)
+                info["metadata"]["time_to_first_token_s"] = round(ttft, 3)
 
     # -- Tool callbacks --
 
@@ -571,11 +585,20 @@ class TraqoCallback(BaseCallbackHandler):
         if not info:
             return
         duration = (datetime.now(timezone.utc) - info["start"]).total_seconds()
+
+        # Resolve tool name: prefer name from on_tool_start, but LangGraph
+        # often passes name=None there. Fall back to output.name (ToolMessage).
+        name = info["name"]
+        if not name or name == "tool":
+            tool_name = getattr(output, "name", None)
+            if tool_name:
+                name = tool_name
+
         end_event: dict[str, Any] = {
             "type": "span_end",
             "id": info["span_id"],
             "parent_id": info["parent_id"],
-            "name": info["name"],
+            "name": name,
             "ts": _now(),
             "duration_s": round(duration, 3),
             "status": "ok",

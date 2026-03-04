@@ -70,7 +70,7 @@ export function ChildTraceNode({
           <span className="inline-block px-1.5 py-0.5 rounded bg-orange/15 text-orange text-[11px] font-medium font-mono">
             child
           </span>
-          <span className="text-[13px] font-medium truncate">{child.name}</span>
+          <span className="text-[13px] font-medium truncate">{child.name.replace(/\.jsonl(?:\.gz)?$/, "")}</span>
           {childHasErrors && (
             <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-err" title="Contains errors" />
           )}
@@ -148,11 +148,12 @@ function ChildSpanTree({
   const t1 = traceEnd?.ts ? new Date(traceEnd.ts).getTime() : t0;
   const dur = t1 - t0 || 1;
 
-  // Build tree
+  // Build tree — treat orphaned spans (parent not in this file) as roots
+  const spanIds = new Set(spans.map((s) => s.id));
   const roots: typeof spans = [];
   const childrenMap = new Map<string, typeof spans>();
   for (const s of spans) {
-    if (!s.parent_id) {
+    if (!s.parent_id || !spanIds.has(s.parent_id)) {
       roots.push(s);
     } else {
       const arr = childrenMap.get(s.parent_id) ?? [];

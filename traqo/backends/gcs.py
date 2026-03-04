@@ -73,8 +73,7 @@ class GCSBackend:
 
         name = trace_path.name
         if name.endswith(".jsonl.gz"):
-            blob.content_encoding = "gzip"
-            content_type = "application/x-ndjson"
+            content_type = "application/gzip"
         elif name.endswith(".content.jsonl.zst"):
             content_type = "application/zstd"
         else:
