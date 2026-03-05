@@ -18,7 +18,8 @@ class TestChildTracer:
             with child:
                 child.log("from_child", {"x": 1})
 
-        assert child_path.exists()
+        child_gz = child_path.parent / (child_path.stem + ".jsonl.gz")
+        assert child_gz.exists()
         child_events = read_events(child_path)
         evt = [e for e in child_events if e["type"] == "event"]
         assert len(evt) == 1
@@ -129,7 +130,7 @@ class TestChildTracer:
             with child:
                 child.log("hi")
 
-        files = list((tmp_path / "traces").glob("my_agent_*.jsonl"))
+        files = list((tmp_path / "traces").glob("my_agent_*.jsonl.gz"))
         assert len(files) == 1
 
     def test_child_context_switches(self, tmp_path: Path):

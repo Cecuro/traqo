@@ -51,6 +51,7 @@ def split_and_compress(
     cctx = zstd.ZstdCompressor(level=3)
 
     content_file = None
+    ok = False
     try:
         with (
             open(trace_path, encoding="utf-8") as raw,
@@ -95,9 +96,14 @@ def split_and_compress(
                         }
 
                 main_out.write(json.dumps(event, separators=(",", ":")) + "\n")
+        ok = True
     finally:
         if content_file is not None:
             content_file.close()
+        if not ok:
+            # Clean up partial files so the raw .jsonl remains the sole source
+            main_path.unlink(missing_ok=True)
+            content_path.unlink(missing_ok=True)
 
     if not has_content:
         content_path.unlink(missing_ok=True)

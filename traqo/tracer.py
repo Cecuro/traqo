@@ -276,6 +276,7 @@ class Tracer:
             from traqo.compress import split_and_compress
 
             main_path, content_path = split_and_compress(self._path)
+            self._path.unlink(missing_ok=True)
             paths = [main_path]
             if content_path is not None:
                 paths.append(content_path)

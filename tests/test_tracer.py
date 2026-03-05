@@ -445,7 +445,9 @@ class TestCreatesDirs:
         deep = tmp_path / "a" / "b" / "c" / "trace.jsonl"
         with Tracer(path=deep):
             pass
-        assert deep.exists()
+        # Raw .jsonl is replaced by .jsonl.gz after compression
+        gz = deep.parent / (deep.stem + ".jsonl.gz")
+        assert gz.exists()
 
 
 class TestAutoPath:
@@ -453,21 +455,21 @@ class TestAutoPath:
         monkeypatch.setenv("TRAQO_TRACE_DIR", str(tmp_path))
         with Tracer("my_experiment"):
             pass
-        files = list(tmp_path.glob("my_experiment_*.jsonl"))
+        files = list(tmp_path.glob("my_experiment_*.jsonl.gz"))
         assert len(files) == 1
 
     def test_no_args_creates_file(self, tmp_path: Path, monkeypatch):
         monkeypatch.setenv("TRAQO_TRACE_DIR", str(tmp_path))
         with Tracer():
             pass
-        files = list(tmp_path.glob("*.jsonl"))
+        files = list(tmp_path.glob("*.jsonl.gz"))
         assert len(files) == 1
 
     def test_name_in_trace_start(self, tmp_path: Path, monkeypatch):
         monkeypatch.setenv("TRAQO_TRACE_DIR", str(tmp_path))
         with Tracer("my_experiment"):
             pass
-        files = list(tmp_path.glob("my_experiment_*.jsonl"))
+        files = list(tmp_path.glob("my_experiment_*.jsonl.gz"))
         events = read_events(files[0])
         assert events[0]["type"] == "trace_start"
         assert events[0]["name"] == "my_experiment"
@@ -492,9 +494,9 @@ class TestAutoPath:
             pass
 
         flush_backends()
-        # Buffer file should be cleaned up
-        files = list(tmp_path.glob("ephemeral_*.jsonl"))
-        assert len(files) == 0
+        # Raw .jsonl always deleted; auto_path + backends also cleans compressed
+        assert list(tmp_path.glob("ephemeral_*.jsonl")) == []
+        assert list(tmp_path.glob("ephemeral_*.jsonl.gz")) == []
         assert len(completed) == 1
 
     def test_explicit_path_not_cleaned_up(self, tmp_path: Path):
@@ -515,17 +517,21 @@ class TestAutoPath:
             pass
 
         flush_backends()
-        assert path.exists()
+        # Raw is deleted but compressed stays for explicit paths
+        gz = path.parent / (path.stem + ".jsonl.gz")
+        assert gz.exists()
 
     def test_auto_path_no_backends_not_cleaned_up(self, tmp_path: Path):
         with Tracer("keep_this", trace_dir=tmp_path):
             pass
-        files = list(tmp_path.glob("keep_this_*.jsonl"))
+        # Raw deleted, compressed stays (no backends to clean compressed)
+        assert list(tmp_path.glob("keep_this_*.jsonl")) == []
+        files = list(tmp_path.glob("keep_this_*.jsonl.gz"))
         assert len(files) == 1
 
     def test_trace_dir_kwarg(self, tmp_path: Path):
         custom_dir = tmp_path / "custom"
         with Tracer("experiment", trace_dir=custom_dir):
             pass
-        files = list(custom_dir.glob("experiment_*.jsonl"))
+        files = list(custom_dir.glob("experiment_*.jsonl.gz"))
         assert len(files) == 1
