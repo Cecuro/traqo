@@ -82,9 +82,8 @@ def split_and_compress(
                     if len(input_json.encode("utf-8")) > threshold:
                         # Externalize this input
                         if content_file is None:
-                            content_file = cctx.stream_writer(
-                                open(content_path, "wb")  # noqa: SIM115
-                            )
+                            content_raw = open(content_path, "wb")  # noqa: SIM115
+                            content_file = cctx.stream_writer(content_raw, closefd=True)
                             has_content = True
 
                         content_entry = json.dumps(

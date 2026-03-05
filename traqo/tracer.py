@@ -313,19 +313,18 @@ class Tracer:
     def _schedule_cleanup(
         self, upload_futures: list[Future], upload_paths: list[Path] | None = None
     ) -> None:
-        """Delete the auto-generated buffer file after backends finish uploading."""
+        """Delete auto-generated compressed files after backends finish uploading."""
         if not self._auto_path or not self._backends:
             return
         from traqo.backend import submit_background
 
-        raw_path = self._path
-        extra_paths = upload_paths or []
+        paths_to_delete = upload_paths or []
 
         def _wait_and_delete():
             for fut in upload_futures:
                 with contextlib.suppress(Exception):
                     fut.result(timeout=600)
-            for p in [raw_path, *extra_paths]:
+            for p in paths_to_delete:
                 try:
                     p.unlink(missing_ok=True)
                 except Exception:
