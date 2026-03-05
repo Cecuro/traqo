@@ -728,6 +728,14 @@ class TestLLMCallbacks:
         assert usage["cache_read_tokens"] == 30
         assert usage["cache_creation_tokens"] == 10
 
+        trace_end = [e for e in events if e["type"] == "trace_end"][0]
+        stats = trace_end["stats"]
+        assert stats["total_input_tokens"] == 100
+        assert stats["total_output_tokens"] == 50
+        assert stats["total_cache_read_tokens"] == 30
+        assert stats["total_cache_creation_tokens"] == 10
+        assert stats["total_reasoning_tokens"] == 20
+
 
 # ---------------------------------------------------------------------------
 # Tool callbacks (on_tool_start / on_tool_end / on_tool_error)

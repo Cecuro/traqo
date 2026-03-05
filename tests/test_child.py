@@ -82,6 +82,45 @@ class TestChildTracer:
         assert ended["data"]["total_output_tokens"] == 15
         assert "duration_s" in ended["data"]
 
+    def test_child_cache_tokens_rolled_up(self, tmp_path: Path):
+        """Cache and reasoning tokens from child must appear in parent stats and events."""
+        parent_path = tmp_path / "parent.jsonl"
+        child_path = tmp_path / "child.jsonl"
+
+        with Tracer(path=parent_path) as parent:
+            child = parent.child("agent_a", path=child_path)
+            with child:
+                with child.span(
+                    "call1",
+                    metadata={
+                        "token_usage": {
+                            "input_tokens": 100,
+                            "output_tokens": 50,
+                            "cache_read_tokens": 80,
+                            "cache_creation_tokens": 10,
+                            "reasoning_tokens": 5,
+                        }
+                    },
+                    kind="llm",
+                ):
+                    pass
+
+        parent_events = read_events(parent_path)
+        ended = [
+            e
+            for e in parent_events
+            if e["type"] == "event" and e.get("name") == "child_ended"
+        ][0]
+        assert ended["data"]["total_cache_read_tokens"] == 80
+        assert ended["data"]["total_cache_creation_tokens"] == 10
+        assert ended["data"]["total_reasoning_tokens"] == 5
+
+        trace_end = [e for e in parent_events if e["type"] == "trace_end"][0]
+        stats = trace_end["stats"]
+        assert stats["total_cache_read_tokens"] == 80
+        assert stats["total_cache_creation_tokens"] == 10
+        assert stats["total_reasoning_tokens"] == 5
+
     def test_child_default_path(self, tmp_path: Path):
         parent_path = tmp_path / "traces" / "parent.jsonl"
 

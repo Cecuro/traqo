@@ -210,11 +210,21 @@ class Tracer:
         with self._lock:
             self._stats_errors += 1
 
-    def record_tokens(self, input_tokens: int = 0, output_tokens: int = 0) -> None:
+    def record_tokens(
+        self,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cache_read_tokens: int = 0,
+        cache_creation_tokens: int = 0,
+        reasoning_tokens: int = 0,
+    ) -> None:
         """Accumulate token counts. For use by integrations."""
         with self._lock:
             self._stats_input_tokens += input_tokens
             self._stats_output_tokens += output_tokens
+            self._stats_cache_read_tokens += cache_read_tokens
+            self._stats_cache_creation_tokens += cache_creation_tokens
+            self._stats_reasoning_tokens += reasoning_tokens
 
     def _open(self) -> None:
         if self._disabled:
@@ -597,6 +607,8 @@ class Tracer:
             "spans": child._stats_spans,
             "total_input_tokens": child._stats_input_tokens,
             "total_output_tokens": child._stats_output_tokens,
+            "total_cache_read_tokens": child._stats_cache_read_tokens,
+            "total_cache_creation_tokens": child._stats_cache_creation_tokens,
             "total_reasoning_tokens": child._stats_reasoning_tokens,
         }
         self._children.append(summary)
@@ -624,6 +636,10 @@ class Tracer:
                     "spans": summary["spans"],
                     "total_input_tokens": summary["total_input_tokens"],
                     "total_output_tokens": summary["total_output_tokens"],
+                    "total_cache_read_tokens": summary["total_cache_read_tokens"],
+                    "total_cache_creation_tokens": summary[
+                        "total_cache_creation_tokens"
+                    ],
                     "total_reasoning_tokens": summary["total_reasoning_tokens"],
                 },
             }

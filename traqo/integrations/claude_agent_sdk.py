@@ -333,6 +333,10 @@ async def traqo_agent(
                 "spans": stats.get("spans", 0),
                 "total_input_tokens": stats.get("total_input_tokens", 0),
                 "total_output_tokens": stats.get("total_output_tokens", 0),
+                "total_cache_read_tokens": stats.get("total_cache_read_tokens", 0),
+                "total_cache_creation_tokens": stats.get(
+                    "total_cache_creation_tokens", 0
+                ),
                 "total_reasoning_tokens": stats.get("total_reasoning_tokens", 0),
             }
             parent._children.append(summary)
@@ -362,6 +366,10 @@ async def traqo_agent(
                         "spans": summary["spans"],
                         "total_input_tokens": summary["total_input_tokens"],
                         "total_output_tokens": summary["total_output_tokens"],
+                        "total_cache_read_tokens": summary["total_cache_read_tokens"],
+                        "total_cache_creation_tokens": summary[
+                            "total_cache_creation_tokens"
+                        ],
                         "total_reasoning_tokens": summary["total_reasoning_tokens"],
                     },
                 }

@@ -69,6 +69,46 @@ class TestTraceStartEnd:
         assert stats["total_input_tokens"] == 100
         assert stats["total_output_tokens"] == 50
 
+    def test_trace_end_cache_tokens(self, trace_file: Path):
+        with Tracer(path=trace_file) as tracer:
+            with tracer.span(
+                "llm_call",
+                metadata={
+                    "token_usage": {
+                        "input_tokens": 200,
+                        "output_tokens": 50,
+                        "cache_read_tokens": 150,
+                        "cache_creation_tokens": 30,
+                    }
+                },
+                kind="llm",
+            ):
+                pass
+        events = read_events(trace_file)
+        stats = events[-1]["stats"]
+        assert stats["total_cache_read_tokens"] == 150
+        assert stats["total_cache_creation_tokens"] == 30
+        assert stats["total_input_tokens"] == 200
+
+    def test_record_tokens_all_types(self, trace_file: Path):
+        """record_tokens() must accumulate cache and reasoning tokens."""
+        with Tracer(path=trace_file) as tracer:
+            tracer.record_span()
+            tracer.record_tokens(
+                input_tokens=100,
+                output_tokens=50,
+                cache_read_tokens=80,
+                cache_creation_tokens=20,
+                reasoning_tokens=10,
+            )
+        events = read_events(trace_file)
+        stats = events[-1]["stats"]
+        assert stats["total_input_tokens"] == 100
+        assert stats["total_output_tokens"] == 50
+        assert stats["total_cache_read_tokens"] == 80
+        assert stats["total_cache_creation_tokens"] == 20
+        assert stats["total_reasoning_tokens"] == 10
+
     def test_trace_end_token_accumulation(self, trace_file: Path):
         with Tracer(path=trace_file) as tracer:
             with tracer.span(
