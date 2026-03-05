@@ -17,7 +17,7 @@ Analyze JSONL traces produced by the `traqo` Python package.
 
 ## Trace File Structure
 
-Traces may be stored as raw `.jsonl`, compressed `.jsonl.gz`, or split into `.jsonl.gz` (main) + `.content.jsonl.zst` (externalized large span inputs). Last line is always `trace_end` with summary stats. Start there.
+Traces are stored as compressed `.jsonl.gz` files, optionally with a `.content.jsonl.zst` sidecar for externalized large span inputs. The raw `.jsonl` buffer is deleted after compression. Last line is always `trace_end` with summary stats. Start there.
 
 For compressed traces, large `span_start` inputs (>10 KB) are replaced with `{"_ref": "<span_id>", "_size": N}` stubs. The full input lives in the companion `.content.jsonl.zst` file. If you see a `_ref` stub, use `traqo ui` (loads on click) or the Python `read_content()` API to retrieve the original input.
 
@@ -63,27 +63,23 @@ A child trace is a complete, self-contained trace file with its own `trace_start
 
 ### File formats
 
-Traces on disk may be raw `.jsonl` or compressed `.jsonl.gz` (with an optional `.content.jsonl.zst` sidecar). Check what you have first:
+Traces are stored as compressed `.jsonl.gz` files, with an optional `.content.jsonl.zst` sidecar for large span inputs:
 
 ```bash
-ls traces/    # Look for .jsonl, .jsonl.gz, .content.jsonl.zst
+ls traces/    # Look for .jsonl.gz and .content.jsonl.zst
 ```
 
-For **raw `.jsonl`** — use `grep`, `tail`, `jq` directly.
-For **compressed `.jsonl.gz`** — use `zcat` (Linux) or `gzcat` (macOS) to decompress, then pipe to `grep`/`jq`. Or use `zgrep` for grep-like searches.
+Use `zcat` (Linux) or `gzcat` (macOS) to read, then pipe to `grep`/`jq`:
 
 ```bash
-# Raw
-tail -1 trace.jsonl | jq .
-
-# Compressed (macOS)
+# macOS
 gzcat trace.jsonl.gz | tail -1 | jq .
 
-# Compressed (Linux)
+# Linux
 zcat trace.jsonl.gz | tail -1 | jq .
 ```
 
-**Tip:** For large or compressed traces, prefer `traqo ui` over shell commands.
+**Tip:** For large traces, prefer `traqo ui` over shell commands.
 
 ### Downloading traces from cloud storage
 ```bash

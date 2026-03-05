@@ -265,10 +265,10 @@ class Tracer:
                 )
 
     def _prepare_for_upload(self) -> list[Path]:
-        """Split and compress the trace file for upload.
+        """Compress the trace and delete the raw ``.jsonl`` buffer.
 
-        Returns a list of paths to upload (main + optional content file).
-        Falls back to the original file on any error.
+        Returns compressed paths (``.jsonl.gz`` + optional ``.content.jsonl.zst``).
+        Falls back to the raw file if compression fails.
         """
         if self._disabled or not self._path.is_file():
             return [self._path]

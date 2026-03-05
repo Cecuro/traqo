@@ -19,7 +19,7 @@ with Tracer(Path("traces/run.jsonl"), input={"query": "Is this a bug?"}):
     result = classify("Is this a bug?")
 ```
 
-Your traces are just `.jsonl` files. Read them with `grep`, query them with DuckDB, or hand them to an AI assistant.
+Your traces are compressed `.jsonl.gz` files. Read them with `gzcat | jq`, query with DuckDB, use `traqo ui` for visual exploration, or hand them to an AI assistant.
 
 ## Why traqo?
 
@@ -130,19 +130,22 @@ def classify(text: str) -> str:
 
 ```bash
 # Last line is always trace_end with summary stats
-tail -1 traces/my_run.jsonl | jq .
+gzcat traces/my_run.jsonl.gz | tail -1 | jq .
 
 # All LLM spans
-grep '"kind":"llm"' traces/my_run.jsonl | jq .
+gzcat traces/my_run.jsonl.gz | grep '"kind":"llm"' | jq .
 
 # Filter by tag
-grep '"tags"' traces/my_run.jsonl | jq .
+gzcat traces/my_run.jsonl.gz | grep '"tags"' | jq .
 
 # Errors
-grep '"status":"error"' traces/**/*.jsonl
+for f in traces/**/*.jsonl.gz; do gzcat "$f" | grep '"status":"error"'; done
 
 # Token usage from span metadata
-grep '"token_usage"' traces/**/*.jsonl | jq '.metadata.token_usage'
+gzcat traces/my_run.jsonl.gz | grep '"token_usage"' | jq '.metadata.token_usage'
+
+# Or use the built-in trace viewer UI
+traqo ui ./traces
 ```
 
 ## Claude Agent SDK Integration
@@ -253,7 +256,7 @@ with Tracer(
 | `tags` | `list[str]` | `[]` | Tags for filtering/categorization, written to `trace_start`. |
 | `thread_id` | `str` | `None` | Conversation/thread grouping ID, written to `trace_start`. |
 | `capture_content` | `bool` | `True` | If `False`, integration wrappers omit LLM message inputs/outputs. The `@trace` decorator has separate `capture_input`/`capture_output` flags. |
-| `backends` | `list[Backend]` | `None` | Storage backends notified on events and trace completion. The local JSONL file is always written regardless. |
+| `backends` | `list[Backend]` | `None` | Storage backends notified on events and trace completion. Traces are compressed to `.jsonl.gz` locally; backends receive the compressed paths. |
 
 **Methods:**
 

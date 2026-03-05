@@ -41,23 +41,27 @@ class Backend(Protocol):
     All methods must not raise — implementations should catch and log internally.
 
     Lifecycle:
-    - ``on_event`` is called after each event is written to the local JSONL file.
-    - ``on_trace_complete`` is called after the trace file is fully written and closed.
+    - ``on_event`` is called after each event is written to the temporary
+      ``.jsonl`` buffer during execution.
+    - ``on_trace_complete`` is called once per compressed output file
+      (``.jsonl.gz`` and optional ``.content.jsonl.zst``) after the trace
+      is fully written, closed, and compressed.
     - ``close`` is called during process shutdown (via ``shutdown_backends``) or
       explicitly by the user.  It is NOT called automatically from ``Tracer.__exit__``
       — backends are long-lived and may be shared across multiple tracers.
     """
 
     def on_event(self, event: dict[str, Any]) -> None:
-        """Called after each event is written to the local JSONL file.
+        """Called after each event is written to the temporary ``.jsonl`` buffer.
 
         For streaming backends. Batch-upload backends should no-op here.
         """
         ...
 
     def on_trace_complete(self, trace_path: Path) -> Future | None:
-        """Called after the trace file is fully written and closed.
+        """Called with each compressed output file after trace close.
 
+        ``trace_path`` is a ``.jsonl.gz`` or ``.content.jsonl.zst`` file.
         Returns a Future for async work (e.g. background upload), or None
         if work completed synchronously.
         """

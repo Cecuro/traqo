@@ -6,6 +6,10 @@ Splits a raw JSONL trace into two compressed files:
 
 Large span_start inputs are replaced with a reference stub:
     {"_ref": "<span_id>", "_size": <byte_count>}
+
+The raw ``.jsonl`` input is deleted by the caller after successful compression.
+On failure, partial compressed files are cleaned up so the raw file remains
+the sole source of truth.
 """
 
 from __future__ import annotations

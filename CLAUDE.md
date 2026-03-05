@@ -67,7 +67,7 @@ traqo is a structured JSONL tracing library. It writes trace events (one JSON ob
 
 ### Core flow
 
-`Tracer` (context manager) → opens a JSONL file → `span()` creates nested spans → each span writes `span_start`/`span_end` events → `Tracer.__exit__` writes `trace_end` with aggregated stats → `_prepare_for_upload()` splits and compresses into `.jsonl.gz` + optional `.content.jsonl.zst` → backends receive compressed paths.
+`Tracer` (context manager) → opens a temporary `.jsonl` buffer → `span()` creates nested spans → each span writes `span_start`/`span_end` events → `Tracer.__exit__` writes `trace_end` with aggregated stats → `_prepare_for_upload()` compresses into `.jsonl.gz` + optional `.content.jsonl.zst`, then deletes the raw `.jsonl` → backends receive compressed paths.
 
 Parent-child span nesting is tracked via a `ContextVar` span stack (`_span_stack` in `tracer.py`). Each span reads the current stack top as its `parent_id`, then pushes itself. This is async-safe — concurrent tasks get isolated stacks.
 
@@ -88,7 +88,7 @@ Spans store `metadata["token_usage"] = {"input_tokens": N, "output_tokens": N, "
 
 ### Storage backends
 
-Backends are additive — the local JSONL file is always written as the source of truth. Backends receive notifications via `on_event()` (after each write) and `on_trace_complete()` (after file close). `close()` is NOT called from `Tracer.__exit__()` — backends are long-lived and may be shared. Cleanup happens via atexit or explicit `shutdown_backends()`. Child tracers inherit their parent's backends. Backend validation happens in `Tracer.__init__()`.
+Backends are additive — traces are written to a temporary `.jsonl` buffer during execution, then compressed to `.jsonl.gz` + optional `.content.jsonl.zst` on close. The raw buffer is deleted after compression. Backends receive `on_event()` during execution (after each write) and `on_trace_complete()` with compressed file paths. `close()` is NOT called from `Tracer.__exit__()` — backends are long-lived and may be shared. Cleanup happens via atexit or explicit `shutdown_backends()`. Child tracers inherit their parent's backends. Backend validation happens in `Tracer.__init__()`.
 
 ### 5 event types
 
