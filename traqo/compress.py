@@ -6,6 +6,10 @@ Splits a raw JSONL trace into two compressed files:
 
 Large span_start inputs are replaced with a reference stub:
     {"_ref": "<span_id>", "_size": <byte_count>}
+
+The raw ``.jsonl`` input is deleted by the caller after successful compression.
+On failure, partial compressed files are cleaned up so the raw file remains
+the sole source of truth.
 """
 
 from __future__ import annotations
@@ -51,6 +55,7 @@ def split_and_compress(
     cctx = zstd.ZstdCompressor(level=3)
 
     content_file = None
+    ok = False
     try:
         with (
             open(trace_path, encoding="utf-8") as raw,
@@ -77,9 +82,8 @@ def split_and_compress(
                     if len(input_json.encode("utf-8")) > threshold:
                         # Externalize this input
                         if content_file is None:
-                            content_file = cctx.stream_writer(
-                                open(content_path, "wb")  # noqa: SIM115
-                            )
+                            content_raw = open(content_path, "wb")  # noqa: SIM115
+                            content_file = cctx.stream_writer(content_raw, closefd=True)
                             has_content = True
 
                         content_entry = json.dumps(
@@ -95,9 +99,14 @@ def split_and_compress(
                         }
 
                 main_out.write(json.dumps(event, separators=(",", ":")) + "\n")
+        ok = True
     finally:
         if content_file is not None:
             content_file.close()
+        if not ok:
+            # Clean up partial files so the raw .jsonl remains the sole source
+            main_path.unlink(missing_ok=True)
+            content_path.unlink(missing_ok=True)
 
     if not has_content:
         content_path.unlink(missing_ok=True)

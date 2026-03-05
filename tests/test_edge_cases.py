@@ -6,7 +6,6 @@ a failing test confirms the bug is real.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
@@ -22,13 +21,9 @@ from traqo.tracer import Tracer, _span_stack, get_tracer
 
 
 def _read_events(path: Path) -> list[dict]:
-    events = []
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                events.append(json.loads(line))
-    return events
+    from tests.conftest import read_events
+
+    return read_events(path)
 
 
 # ===========================================================================

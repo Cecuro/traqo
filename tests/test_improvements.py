@@ -80,8 +80,8 @@ class TestSubtrace:
             with child_tracer:
                 assert get_tracer() is child_tracer
 
-        # Child file should exist at parent_dir/agent_a_*.jsonl
-        child_files = list(tmp_path.glob("agent_a_*.jsonl"))
+        # Child file should exist at parent_dir/agent_a_*.jsonl.gz
+        child_files = list(tmp_path.glob("agent_a_*.jsonl.gz"))
         assert len(child_files) == 1
 
         # Parent should have child events
@@ -106,7 +106,7 @@ class TestSubtrace:
         with subtrace("agent", trace_dir=tmp_path):
             tracer = get_tracer()
             assert tracer is not None
-        files = list(tmp_path.glob("agent_*.jsonl"))
+        files = list(tmp_path.glob("agent_*.jsonl.gz"))
         assert len(files) == 1
 
     def test_subtrace_passes_metadata_to_child(self, tmp_path: Path):
@@ -116,7 +116,7 @@ class TestSubtrace:
             with subtrace("agent_a", metadata={"custom": "value"}):
                 pass
 
-        child_files = list(tmp_path.glob("agent_a_*.jsonl"))
+        child_files = list(tmp_path.glob("agent_a_*.jsonl.gz"))
         assert len(child_files) == 1
         child_events = read_events(child_files[0])
         meta = child_events[0]["metadata"]
@@ -566,11 +566,12 @@ class TestAggregateTokens:
             ):
                 pass
 
-        spans = list(iter_llm_spans(path))
+        gz_path = path.parent / (path.stem + ".jsonl.gz")
+        spans = list(iter_llm_spans(gz_path))
         assert len(spans) == 1
         assert spans[0].model == "gpt-4o"
         assert spans[0].input_tokens == 100
         assert spans[0].output_tokens == 50
 
-        agg = aggregate_tokens(path)
+        agg = aggregate_tokens(gz_path)
         assert agg == {"gpt-4o": {"input": 100, "output": 50}}
