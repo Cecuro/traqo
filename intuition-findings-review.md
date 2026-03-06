@@ -8,24 +8,45 @@
 
 | Finding | Verdict | Report? |
 |---------|---------|---------|
-| MED-1: Rollover re-init on zero | **VALID** | Yes |
+| MED-1: Rollover re-init on zero | **Low/QA** (code quality, not exploitable) | No |
 | MED-2: Epoch-boundary timing | **INVALID** | No |
 | MED-3: deposit_for griefing | **OUT OF SCOPE** | No |
 | MED-4: Bridge fee quoting | **Previously known / Speculative** | No |
 
 ---
 
-## MED-1: `totalUtilization` epoch rollover re-initializes when value returns to zero — VALID
+## MED-1: `totalUtilization` epoch rollover re-initializes when value returns to zero — Low/QA (downgraded)
 
 **Location:** `MultiVault.sol:1529-1534`
 
-The `_rollover()` function uses `totalUtilization[currentEpochLocal] == 0` as a sentinel for "first action in epoch." But `totalUtilization` is an `int256` that is incremented by deposits and decremented by withdrawals, so it can legitimately return to zero after real activity within the same epoch. When this happens, the next action re-triggers the rollover branch, recopying the previous epoch's value and injecting phantom utilization.
+**Code pattern is technically wrong** — using `value == 0` as an initialization sentinel is fragile. However, the claimed attack path is not viable.
 
-The same pattern affects `personalUtilization` at line 1545.
+### Why totalUtilization cannot reach 0
 
-**Downstream impact:** Corrupted utilization deltas flow into `TrustBonding._getSystemUtilizationRatio()` and `_emissionsForEpoch()`, causing misallocation of token emissions.
+The finding's "concrete trace" assumes utilization can freely go to zero through deposits and withdrawals. This ignores three structural invariants:
 
-**Fix:** Use a separate `mapping(uint256 => bool) totalUtilizationInitialized` flag instead of inferring initialization from `value == 0`.
+1. **Protocol fees on entry create a permanent gap.** Deposits add full `msg.value` to utilization (line 676), but protocol fees (`atomCreationProtocolFee`, `protocolFee`) are extracted before assets enter the vault. Redemptions remove `rawAssetsBeforeFees` (line 838), which can only draw from what's IN the vault — structurally less than what was deposited.
+
+2. **MinShares are permanently locked.** On vault creation (line 1596), `minShare` is minted to `BURN_ADDRESS`. These shares' underlying assets can never be redeemed, creating a permanent positive utilization floor.
+
+3. **Exit fees further widen the gap.** Each redemption cycle leaves a positive residual in utilization.
+
+**Net effect:** `totalUtilization` is monotonically biased upward. Once any deposit occurs, it cannot return to 0 through normal protocol operations.
+
+### personalUtilization is double-guarded
+
+The finding claims `personalUtilization` is also affected, but it has a second guard the finding ignores. At line 1538:
+```solidity
+if (userLastEpoch == currentEpochLocal) {
+    return; // already up to date; no rollover needed
+}
+```
+Once a user acts in the current epoch, `userEpochHistory[user][0]` is set to `currentEpochLocal`. All subsequent calls for that user in the same epoch skip the entire personal rollover block. Even if personalUtilization reached 0, re-rollover cannot happen.
+
+### C4 severity assessment
+
+- **Not Medium.** C4 Medium requires "assets not at direct risk, but function of protocol could be impacted, or leak value with hypothetical attack path with stated assumptions, but external requirements." Here the external requirements are effectively impossible (entire protocol utilization reaching exactly zero wei).
+- **Low/QA.** The code pattern is incorrect as a matter of defensive programming, but has no practical impact. Recommend fixing the sentinel pattern as good practice, but this does not warrant a Medium payout.
 
 ---
 
