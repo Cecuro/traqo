@@ -418,7 +418,7 @@ class Tracer:
             self._parent._write_child_started(self._child_name, self._path)
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
         if self._parent is not None:
             self._parent._write_child_ended(self._child_name, self)
         duration = (
@@ -463,7 +463,7 @@ class Tracer:
     async def __aenter__(self) -> Tracer:
         return self.__enter__()
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool:
         return self.__exit__(exc_type, exc_val, exc_tb)
 
     def log(self, name: str, data: dict[str, Any] | None = None) -> None:
@@ -545,7 +545,7 @@ class Tracer:
                     "ts": _now(),
                     "duration_s": round(duration, 3),
                     "status": "error",
-                    "error": serialize_error(sys.exc_info()[1]),
+                    "error": serialize_error(sys.exc_info()[1]),  # type: ignore[arg-type]
                 }
                 if kind is not None:
                     end_event["kind"] = kind

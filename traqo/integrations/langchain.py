@@ -1033,7 +1033,7 @@ class TracedChatModel(BaseChatModel):
 
     @property
     def _identifying_params(self) -> dict[str, Any]:
-        return self.wrapped._identifying_params
+        return dict(self.wrapped._identifying_params)
 
     def bind_tools(self, tools: Any, **kwargs: Any) -> Any:
         """Delegate tool binding to wrapped model, keeping tracing active."""
