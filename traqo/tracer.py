@@ -124,6 +124,15 @@ class Tracer:
         flush_interval: float = 2.0,
         flush_threshold: int = 256_000,
     ) -> None:
+        """
+        Args:
+            flush_interval: Minimum seconds between disk flushes. Flushes are
+                lazy — they happen on the next ``_write()`` call after the
+                interval elapses, not on a background timer. Set to ``0`` for
+                per-event flushing (old behavior).
+            flush_threshold: Approximate buffer size in bytes before forcing a
+                flush, regardless of the interval.
+        """
         import traqo
 
         self._name = name
@@ -141,6 +150,10 @@ class Tracer:
         self._output: Any = None
 
         # Write buffer — accumulate lines and flush on interval or size threshold.
+        if flush_interval < 0:
+            raise ValueError("flush_interval must be >= 0")
+        if flush_threshold < 0:
+            raise ValueError("flush_threshold must be >= 0")
         self._flush_interval = flush_interval
         self._flush_threshold = flush_threshold
         self._buffer: list[str] = []
@@ -262,7 +275,7 @@ class Tracer:
             line = to_json(event)
             with self._lock:
                 self._buffer.append(line)
-                self._buffer_bytes += len(line)
+                self._buffer_bytes += len(line.encode("utf-8"))
                 now = time.monotonic()
                 if (
                     self._buffer_bytes >= self._flush_threshold

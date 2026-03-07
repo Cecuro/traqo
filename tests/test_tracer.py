@@ -12,7 +12,7 @@ from traqo import Tracer, get_current_span, get_tracer, trace
 
 class TestTraceStartEnd:
     def test_trace_start_written_on_enter(self, trace_file: Path):
-        with Tracer(path=trace_file, flush_interval=0) as tracer:
+        with Tracer(path=trace_file, flush_interval=0):
             # flush_interval=0 forces immediate flush so we can read mid-trace
             events = read_events(trace_file)
             assert len(events) == 1
@@ -136,8 +136,8 @@ class TestBufferedWrites:
         with Tracer(path=trace_file, flush_interval=60) as tracer:
             tracer.log("evt1")
             tracer.log("evt2")
-            # Raw file should not contain the events yet (still in buffer)
-            assert not trace_file.exists() or trace_file.stat().st_size == 0
+            # File exists (opened in append mode) but buffer not yet flushed
+            assert trace_file.stat().st_size == 0
         # After close, all events are flushed and compressed
         events = read_events(trace_file)
         event_names = [e["name"] for e in events if e["type"] == "event"]
@@ -160,6 +160,28 @@ class TestBufferedWrites:
             events = read_events(trace_file)
             names = [e["name"] for e in events if e["type"] == "event"]
             assert "immediate" in names
+
+    def test_concurrent_writes_to_same_tracer(self, trace_file: Path):
+        """Multiple threads writing to the same tracer with buffering."""
+        import concurrent.futures
+
+        with Tracer(path=trace_file) as tracer:
+
+            def write_events(thread_id: int):
+                for i in range(50):
+                    tracer.log(f"thread_{thread_id}_evt_{i}")
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                futures = [pool.submit(write_events, t) for t in range(4)]
+                concurrent.futures.wait(futures)
+                for f in futures:
+                    f.result()  # raise if any thread failed
+
+        events = read_events(trace_file)
+        log_events = [e for e in events if e["type"] == "event"]
+        assert len(log_events) == 200  # 4 threads x 50 events
+        assert events[0]["type"] == "trace_start"
+        assert events[-1]["type"] == "trace_end"
 
     def test_default_flush_interval(self, trace_file: Path):
         """Default buffer params produce valid traces."""
