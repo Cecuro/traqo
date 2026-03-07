@@ -12,7 +12,8 @@ from traqo import Tracer, get_current_span, get_tracer, trace
 
 class TestTraceStartEnd:
     def test_trace_start_written_on_enter(self, trace_file: Path):
-        with Tracer(path=trace_file):
+        with Tracer(path=trace_file, flush_interval=0) as tracer:
+            # flush_interval=0 forces immediate flush so we can read mid-trace
             events = read_events(trace_file)
             assert len(events) == 1
             assert events[0]["type"] == "trace_start"
@@ -127,6 +128,51 @@ class TestTraceStartEnd:
         stats = events[-1]["stats"]
         assert stats["total_input_tokens"] == 300
         assert stats["total_output_tokens"] == 150
+
+
+class TestBufferedWrites:
+    def test_events_buffered_until_close(self, trace_file: Path):
+        """Events are buffered and not written to disk until flush or close."""
+        with Tracer(path=trace_file, flush_interval=60) as tracer:
+            tracer.log("evt1")
+            tracer.log("evt2")
+            # Raw file should not contain the events yet (still in buffer)
+            assert not trace_file.exists() or trace_file.stat().st_size == 0
+        # After close, all events are flushed and compressed
+        events = read_events(trace_file)
+        event_names = [e["name"] for e in events if e["type"] == "event"]
+        assert event_names == ["evt1", "evt2"]
+
+    def test_flush_on_threshold(self, trace_file: Path):
+        """Buffer is flushed when size threshold is exceeded."""
+        # Use a tiny threshold so a single event triggers flush
+        with Tracer(path=trace_file, flush_interval=60, flush_threshold=10) as tracer:
+            tracer.log("big_event", {"data": "x" * 100})
+            # Should have been flushed to disk already
+            assert trace_file.exists()
+            raw_content = trace_file.read_text()
+            assert "big_event" in raw_content
+
+    def test_flush_interval_zero_is_immediate(self, trace_file: Path):
+        """flush_interval=0 gives the old per-event flush behavior."""
+        with Tracer(path=trace_file, flush_interval=0) as tracer:
+            tracer.log("immediate")
+            events = read_events(trace_file)
+            names = [e["name"] for e in events if e["type"] == "event"]
+            assert "immediate" in names
+
+    def test_default_flush_interval(self, trace_file: Path):
+        """Default buffer params produce valid traces."""
+        with Tracer(path=trace_file) as tracer:
+            for i in range(20):
+                tracer.log(f"evt_{i}")
+            with tracer.span("llm_call", kind="llm"):
+                pass
+        events = read_events(trace_file)
+        assert events[0]["type"] == "trace_start"
+        assert events[-1]["type"] == "trace_end"
+        assert events[-1]["stats"]["events"] == 20
+        assert events[-1]["stats"]["spans"] == 1
 
 
 class TestMetadata:

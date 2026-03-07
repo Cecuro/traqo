@@ -72,7 +72,8 @@ class TestEdgeCases:
 
     def test_write_failure_does_not_crash(self, trace_file: Path, caplog):
         """If writing fails, it logs a warning but doesn't crash."""
-        with Tracer(path=trace_file) as tracer:
+        # Use flush_interval=0 so writes go to disk immediately
+        with Tracer(path=trace_file, flush_interval=0) as tracer:
             # Close the file to force a write error
             tracer._file.close()
             with caplog.at_level(logging.WARNING):

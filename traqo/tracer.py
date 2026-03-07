@@ -7,6 +7,7 @@ import logging
 import os
 import sys
 import threading
+import time
 import uuid
 from collections.abc import Sequence
 from concurrent.futures import Future
@@ -120,6 +121,8 @@ class Tracer:
         thread_id: str | None = None,
         capture_content: bool = True,
         backends: Sequence[Backend] | None = None,
+        flush_interval: float = 2.0,
+        flush_threshold: int = 256_000,
     ) -> None:
         import traqo
 
@@ -136,6 +139,13 @@ class Tracer:
         self._token = None
         self._start_time: datetime | None = None
         self._output: Any = None
+
+        # Write buffer — accumulate lines and flush on interval or size threshold.
+        self._flush_interval = flush_interval
+        self._flush_threshold = flush_threshold
+        self._buffer: list[str] = []
+        self._buffer_bytes = 0
+        self._last_flush = 0.0  # set properly in _open()
 
         # Backends
         self._backends: list[Backend] = list(backends) if backends else []
@@ -231,9 +241,17 @@ class Tracer:
             return
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._file = open(self._path, "a", encoding="utf-8")  # noqa: SIM115
+        self._last_flush = time.monotonic()
 
     def _close(self) -> None:
         if self._file:
+            with self._lock:
+                try:
+                    self._flush_buffer()
+                except Exception:
+                    logger.warning(
+                        "traqo: failed to flush buffer on close", exc_info=True
+                    )
             self._file.close()
             self._file = None
 
@@ -243,14 +261,30 @@ class Tracer:
         try:
             line = to_json(event)
             with self._lock:
-                self._file.write(line + "\n")
-                self._file.flush()
+                self._buffer.append(line)
+                self._buffer_bytes += len(line)
+                now = time.monotonic()
+                if (
+                    self._buffer_bytes >= self._flush_threshold
+                    or (now - self._last_flush) >= self._flush_interval
+                ):
+                    self._flush_buffer()
         except Exception:
             logger.warning("traqo: failed to write event", exc_info=True)
             return
         # Notify backends (outside the lock, only on successful write).
         # The event dict is shared across backends and should not be mutated.
         self._notify_backends_event(event)
+
+    def _flush_buffer(self) -> None:
+        """Write buffered lines to disk. Must be called with self._lock held."""
+        if not self._buffer or self._file is None:
+            return
+        self._file.write("\n".join(self._buffer) + "\n")
+        self._file.flush()
+        self._buffer.clear()
+        self._buffer_bytes = 0
+        self._last_flush = time.monotonic()
 
     def _notify_backends_event(self, event: dict[str, Any]) -> None:
         """Notify all backends of a new event. Never raises."""
@@ -565,6 +599,8 @@ class Tracer:
                 metadata=merged_metadata,
                 capture_content=self._capture_content,
                 backends=self._backends,
+                flush_interval=self._flush_interval,
+                flush_threshold=self._flush_threshold,
             )
         else:
             child_tracer = Tracer(
@@ -573,6 +609,8 @@ class Tracer:
                 metadata=merged_metadata,
                 capture_content=self._capture_content,
                 backends=self._backends,
+                flush_interval=self._flush_interval,
+                flush_threshold=self._flush_threshold,
             )
         child_tracer._parent = self
         child_tracer._child_name = name
