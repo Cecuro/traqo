@@ -265,8 +265,8 @@ class Tracer:
                     logger.warning(
                         "traqo: failed to flush buffer on close", exc_info=True
                     )
-            self._file.close()
-            self._file = None
+                self._file.close()
+                self._file = None
 
     def _write(self, event: dict[str, Any]) -> None:
         if self._disabled or self._file is None:
@@ -275,7 +275,7 @@ class Tracer:
             line = to_json(event)
             with self._lock:
                 self._buffer.append(line)
-                self._buffer_bytes += len(line.encode("utf-8"))
+                self._buffer_bytes += len(line)
                 now = time.monotonic()
                 if (
                     self._buffer_bytes >= self._flush_threshold
@@ -294,9 +294,9 @@ class Tracer:
         if not self._buffer or self._file is None:
             return
         self._file.write("\n".join(self._buffer) + "\n")
-        self._file.flush()
         self._buffer.clear()
         self._buffer_bytes = 0
+        self._file.flush()
         self._last_flush = time.monotonic()
 
     def _notify_backends_event(self, event: dict[str, Any]) -> None:

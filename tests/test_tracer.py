@@ -183,6 +183,25 @@ class TestBufferedWrites:
         assert events[0]["type"] == "trace_start"
         assert events[-1]["type"] == "trace_end"
 
+    def test_negative_flush_interval_raises(self, trace_file: Path):
+        """Negative flush_interval is rejected."""
+        with pytest.raises(ValueError, match="flush_interval"):
+            Tracer(path=trace_file, flush_interval=-1)
+
+    def test_negative_flush_threshold_raises(self, trace_file: Path):
+        """Negative flush_threshold is rejected."""
+        with pytest.raises(ValueError, match="flush_threshold"):
+            Tracer(path=trace_file, flush_threshold=-1)
+
+    def test_child_inherits_flush_params(self, trace_file: Path):
+        """Child tracers inherit flush_interval and flush_threshold."""
+        with Tracer(
+            path=trace_file, flush_interval=5.0, flush_threshold=1024
+        ) as tracer:
+            child = tracer.child("sub")
+            assert child._flush_interval == 5.0
+            assert child._flush_threshold == 1024
+
     def test_default_flush_interval(self, trace_file: Path):
         """Default buffer params produce valid traces."""
         with Tracer(path=trace_file) as tracer:

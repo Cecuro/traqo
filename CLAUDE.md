@@ -67,7 +67,7 @@ traqo is a structured JSONL tracing library. It writes trace events (one JSON ob
 
 ### Core flow
 
-`Tracer` (context manager) → opens a temporary `.jsonl` buffer → `span()` creates nested spans → each span writes `span_start`/`span_end` events → `Tracer.__exit__` writes `trace_end` with aggregated stats → `_prepare_for_upload()` compresses into `.jsonl.gz` + optional `.content.jsonl.zst`, then deletes the raw `.jsonl` → backends receive compressed paths.
+`Tracer` (context manager) → opens a temporary `.jsonl` buffer → `span()` creates nested spans → each span writes `span_start`/`span_end` events → writes are buffered in memory and flushed to disk on interval (`flush_interval`, default 2s) or size threshold (`flush_threshold`, default 256 KB); `flush_interval=0` restores per-event flushing → `Tracer.__exit__` writes `trace_end` with aggregated stats, flushes remaining buffer → `_prepare_for_upload()` compresses into `.jsonl.gz` + optional `.content.jsonl.zst`, then deletes the raw `.jsonl` → backends receive compressed paths.
 
 Parent-child span nesting is tracked via a `ContextVar` span stack (`_span_stack` in `tracer.py`). Each span reads the current stack top as its `parent_id`, then pushes itself. This is async-safe — concurrent tasks get isolated stacks.
 
