@@ -231,7 +231,7 @@ Features: folder navigation, search/filter, span tree with waterfall timing, JSO
 
 ## API Reference
 
-### `Tracer(path, *, input=None, metadata=None, tags=None, thread_id=None, capture_content=True, backends=None)`
+### `Tracer(path, *, input=None, metadata=None, tags=None, thread_id=None, capture_content=True, backends=None, flush_interval=2.0, flush_threshold=256_000)`
 
 Creates a trace session writing to a JSONL file. Use as a context manager.
 
@@ -257,6 +257,8 @@ with Tracer(
 | `thread_id` | `str` | `None` | Conversation/thread grouping ID, written to `trace_start`. |
 | `capture_content` | `bool` | `True` | If `False`, integration wrappers omit LLM message inputs/outputs. The `@trace` decorator has separate `capture_input`/`capture_output` flags. |
 | `backends` | `list[Backend]` | `None` | Storage backends notified on events and trace completion. Traces are compressed to `.jsonl.gz` locally; backends receive the compressed paths. |
+| `flush_interval` | `float` | `2.0` | Minimum seconds between disk flushes. Flushes are lazy (on the next write after the interval elapses). Set to `0` for per-event flushing. |
+| `flush_threshold` | `int` | `256_000` | Approximate buffer size in bytes before forcing a flush, regardless of the interval. |
 
 **Methods:**
 
