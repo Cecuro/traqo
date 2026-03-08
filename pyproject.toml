@@ -7,7 +7,7 @@ artifacts = ["traqo/ui/static"]
 
 [project]
 name = "traqo"
-version = "0.7.5"
+version = "0.8.0"
 description = "Structured tracing for applications. JSONL files, hierarchical spans, zero infrastructure."
 requires-python = ">=3.10"
 license = "MIT"
