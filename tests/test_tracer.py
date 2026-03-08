@@ -622,3 +622,208 @@ class TestAutoPath:
             pass
         files = list(custom_dir.glob("experiment_*.jsonl.gz"))
         assert len(files) == 1
+
+
+class TestEnvVarDefaults:
+    def test_flush_interval_from_env(self, trace_file: Path, monkeypatch):
+        monkeypatch.setenv("TRAQO_FLUSH_INTERVAL", "5.0")
+        t = Tracer(path=trace_file)
+        assert t._flush_interval == 5.0
+
+    def test_flush_threshold_from_env(self, trace_file: Path, monkeypatch):
+        monkeypatch.setenv("TRAQO_FLUSH_THRESHOLD", "1024")
+        t = Tracer(path=trace_file)
+        assert t._flush_threshold == 1024
+
+    def test_capture_content_from_env(self, trace_file: Path, monkeypatch):
+        monkeypatch.setenv("TRAQO_CAPTURE_CONTENT", "false")
+        t = Tracer(path=trace_file)
+        assert t._capture_content is False
+
+    def test_constructor_overrides_env(self, trace_file: Path, monkeypatch):
+        monkeypatch.setenv("TRAQO_FLUSH_INTERVAL", "99.0")
+        monkeypatch.setenv("TRAQO_CAPTURE_CONTENT", "false")
+        t = Tracer(path=trace_file, flush_interval=1.0, capture_content=True)
+        assert t._flush_interval == 1.0
+        assert t._capture_content is True
+
+    def test_invalid_env_falls_back_to_default(self, trace_file: Path, monkeypatch):
+        monkeypatch.setenv("TRAQO_FLUSH_INTERVAL", "not_a_number")
+        t = Tracer(path=trace_file)
+        assert t._flush_interval == 2.0
+
+
+class TestRelease:
+    def test_release_in_trace_start(self, trace_file: Path):
+        with Tracer(path=trace_file, release="v1.2.3"):
+            pass
+        events = read_events(trace_file)
+        assert events[0]["release"] == "v1.2.3"
+
+    def test_release_from_env(self, trace_file: Path, monkeypatch):
+        monkeypatch.setenv("TRAQO_RELEASE", "deploy-42")
+        with Tracer(path=trace_file):
+            pass
+        events = read_events(trace_file)
+        assert events[0]["release"] == "deploy-42"
+
+    def test_constructor_overrides_env(self, trace_file: Path, monkeypatch):
+        monkeypatch.setenv("TRAQO_RELEASE", "env-release")
+        with Tracer(path=trace_file, release="explicit-release"):
+            pass
+        events = read_events(trace_file)
+        assert events[0]["release"] == "explicit-release"
+
+    def test_release_none_omitted(self, trace_file: Path):
+        with Tracer(path=trace_file, release=None):
+            pass
+        events = read_events(trace_file)
+        assert "release" not in events[0]
+
+    def test_child_inherits_release(self, trace_file: Path):
+        with Tracer(path=trace_file, release="v1.0.0") as tracer:
+            child = tracer.child("sub")
+            assert child._release == "v1.0.0"
+
+
+class TestMaskCallback:
+    def test_mask_strips_fields(self, trace_file: Path):
+        def mask(event):
+            if "input" in event:
+                event["input"] = "<redacted>"
+            return event
+
+        with Tracer(path=trace_file, mask=mask, flush_interval=0) as tracer:
+            with tracer.span("step", input={"secret": "password123"}):
+                pass
+        events = read_events(trace_file)
+        start = [e for e in events if e["type"] == "span_start"][0]
+        assert start["input"] == "<redacted>"
+
+    def test_child_inherits_mask(self, trace_file: Path):
+        def mask(event):
+            return event
+
+        with Tracer(path=trace_file, mask=mask) as tracer:
+            child = tracer.child("sub")
+            assert child._mask is mask
+
+    def test_no_mask_by_default(self, trace_file: Path):
+        t = Tracer(path=trace_file)
+        assert t._mask is None
+
+
+class TestEventSizeSafetyNet:
+    def test_truncation_triggers(self, trace_file: Path):
+        import traqo.tracer as tracer_mod
+
+        old_max = tracer_mod._MAX_EVENT_BYTES
+        tracer_mod._MAX_EVENT_BYTES = 100  # tiny limit for testing
+        try:
+            with Tracer(path=trace_file, flush_interval=0) as tracer:
+                with tracer.span("big", input="x" * 200):
+                    pass
+            events = read_events(trace_file)
+            start = [e for e in events if e["type"] == "span_start"][0]
+            assert "<truncated:" in start["input"]
+            assert "_truncated" in start
+            assert "input" in start["_truncated"]
+        finally:
+            tracer_mod._MAX_EVENT_BYTES = old_max
+
+    def test_truncation_multiple_fields(self, trace_file: Path):
+        """When first field truncation isn't enough, multiple fields get truncated."""
+        import traqo.tracer as tracer_mod
+
+        old_max = tracer_mod._MAX_EVENT_BYTES
+        tracer_mod._MAX_EVENT_BYTES = 100  # tiny limit
+        try:
+            with Tracer(path=trace_file, flush_interval=0) as tracer:
+                # Span with huge input AND metadata
+                with tracer.span(
+                    "big",
+                    input="x" * 200,
+                    metadata={"huge": "y" * 200},
+                ):
+                    pass
+            events = read_events(trace_file)
+            start = [e for e in events if e["type"] == "span_start"][0]
+            assert isinstance(start["_truncated"], list)
+            assert len(start["_truncated"]) >= 1
+        finally:
+            tracer_mod._MAX_EVENT_BYTES = old_max
+
+    def test_small_events_pass_through(self, trace_file: Path):
+        with Tracer(path=trace_file, flush_interval=0) as tracer:
+            with tracer.span("small", input="hello"):
+                pass
+        events = read_events(trace_file)
+        start = [e for e in events if e["type"] == "span_start"][0]
+        assert start["input"] == "hello"
+        assert "_truncated" not in start
+
+
+class TestCostTracking:
+    def test_cost_in_trace_end_stats(self, trace_file: Path):
+        with Tracer(path=trace_file) as tracer:
+            with tracer.span(
+                "llm_call",
+                metadata={
+                    "token_usage": {
+                        "input_tokens": 100,
+                        "output_tokens": 50,
+                        "cost": 0.025,
+                    }
+                },
+                kind="llm",
+            ):
+                pass
+        events = read_events(trace_file)
+        stats = events[-1]["stats"]
+        assert stats["total_cost"] == 0.025
+
+    def test_cost_accumulation(self, trace_file: Path):
+        with Tracer(path=trace_file) as tracer:
+            with tracer.span(
+                "call1",
+                metadata={
+                    "token_usage": {
+                        "input_tokens": 100,
+                        "output_tokens": 50,
+                        "cost": 0.01,
+                    }
+                },
+                kind="llm",
+            ):
+                pass
+            with tracer.span(
+                "call2",
+                metadata={
+                    "token_usage": {
+                        "input_tokens": 200,
+                        "output_tokens": 100,
+                        "cost": 0.02,
+                    }
+                },
+                kind="llm",
+            ):
+                pass
+        events = read_events(trace_file)
+        stats = events[-1]["stats"]
+        assert abs(stats["total_cost"] - 0.03) < 1e-9
+
+    def test_record_tokens_with_cost(self, trace_file: Path):
+        with Tracer(path=trace_file) as tracer:
+            tracer.record_span()
+            tracer.record_tokens(input_tokens=100, output_tokens=50, cost=0.05)
+        events = read_events(trace_file)
+        stats = events[-1]["stats"]
+        assert stats["total_cost"] == 0.05
+
+    def test_zero_cost_by_default(self, trace_file: Path):
+        with Tracer(path=trace_file) as tracer:
+            with tracer.span("no_cost", kind="llm"):
+                pass
+        events = read_events(trace_file)
+        stats = events[-1]["stats"]
+        assert stats["total_cost"] == 0.0

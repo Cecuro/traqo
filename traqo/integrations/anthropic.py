@@ -13,6 +13,7 @@ except ImportError as err:
         "Anthropic not installed. Install with: pip install traqo[anthropic]"
     ) from err
 
+from traqo.pricing import add_cost
 from traqo.tracer import get_tracer
 
 _ANTHROPIC_MODEL_PARAMS = ("temperature", "max_tokens", "top_p", "top_k")
@@ -62,12 +63,17 @@ def _extract_response(response: Any) -> tuple[Any, dict[str, int], str]:
         cache_creation = getattr(response.usage, "cache_creation_input_tokens", None)
         if cache_read:
             usage["cache_read_tokens"] = cache_read
-            usage["input_tokens"] += cache_read
         if cache_creation:
             usage["cache_creation_tokens"] = cache_creation
-            usage["input_tokens"] += cache_creation
 
     model = response.model or ""
+    # Inflate input_tokens to reflect total volume (Anthropic returns non-cached only)
+    if "cache_read_tokens" in usage:
+        usage["input_tokens"] += usage["cache_read_tokens"]
+    if "cache_creation_tokens" in usage:
+        usage["input_tokens"] += usage["cache_creation_tokens"]
+    if usage and model:
+        add_cost(usage, model)
     return output, usage, model
 
 
@@ -116,10 +122,8 @@ def _aggregate_stream_events(events: list[Any]) -> tuple[Any, dict[str, int], st
                     )
                     if cache_read:
                         usage["cache_read_tokens"] = cache_read
-                        usage["input_tokens"] += cache_read
                     if cache_creation:
                         usage["cache_creation_tokens"] = cache_creation
-                        usage["input_tokens"] += cache_creation
 
         elif event_type == "content_block_start":
             block = getattr(event, "content_block", None)
@@ -164,6 +168,13 @@ def _aggregate_stream_events(events: list[Any]) -> tuple[Any, dict[str, int], st
     else:
         output = text
 
+    # Inflate input_tokens to reflect total volume (Anthropic returns non-cached only)
+    if "cache_read_tokens" in usage:
+        usage["input_tokens"] += usage["cache_read_tokens"]
+    if "cache_creation_tokens" in usage:
+        usage["input_tokens"] += usage["cache_creation_tokens"]
+    if usage and model:
+        add_cost(usage, model)
     return output, usage, model
 
 

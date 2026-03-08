@@ -20,6 +20,7 @@ except ImportError as err:
         "LangChain not installed. Install with: pip install traqo[langchain]"
     ) from err
 
+from traqo.pricing import add_cost
 from traqo.serialize import serialize_error
 from traqo.tracer import _get_parent_id, _now, _uuid, get_tracer
 
@@ -436,13 +437,17 @@ class TraqoCallback(BaseCallbackHandler):
         meta = info["metadata"]
 
         usage = _extract_token_usage_from_response(response)
-        if usage:
-            meta["token_usage"] = usage
 
         # Update model name from response (e.g. Azure OpenAI returns actual model)
         response_model = (response.llm_output or {}).get("model_name")
         if response_model:
             meta["model"] = response_model
+
+        if usage:
+            model = meta.get("model", "")
+            if model:
+                add_cost(usage, model)
+            meta["token_usage"] = usage
 
         end_event: dict[str, Any] = {
             "type": "span_end",
@@ -467,6 +472,7 @@ class TraqoCallback(BaseCallbackHandler):
                 cache_read_tokens=usage.get("cache_read_tokens", 0),
                 cache_creation_tokens=usage.get("cache_creation_tokens", 0),
                 reasoning_tokens=usage.get("reasoning_tokens", 0),
+                cost=usage.get("cost", 0.0),
             )
 
     @_safe_callback
@@ -1072,6 +1078,9 @@ class TracedChatModel(BaseChatModel):
             )
             usage = _extract_token_usage(result)
             if usage:
+                model = _extract_model_name(self.wrapped)
+                if model:
+                    add_cost(usage, model)
                 span.set_metadata("token_usage", usage)
             if tracer.capture_content:
                 span.set_output(_extract_output(result))
@@ -1109,6 +1118,9 @@ class TracedChatModel(BaseChatModel):
             )
             usage = _extract_token_usage(result)
             if usage:
+                model = _extract_model_name(self.wrapped)
+                if model:
+                    add_cost(usage, model)
                 span.set_metadata("token_usage", usage)
             if tracer.capture_content:
                 span.set_output(_extract_output(result))
