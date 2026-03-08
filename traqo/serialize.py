@@ -84,8 +84,9 @@ def _serialize_value(value: Any, *, _seen: set[int] | None = None) -> Any:
                     _serialize_value(v, _seen=_seen) for v in sorted(value, key=str)
                 ]
 
-            # 5. Pydantic
-            if hasattr(value, "model_dump"):
+            # 5. Pydantic-style models (must be a real class method,
+            #    not __getattr__ magic like MagicMock)
+            if hasattr(type(value), "model_dump"):
                 return _serialize_value(value.model_dump(), _seen=_seen)
 
             # 6. Dataclass

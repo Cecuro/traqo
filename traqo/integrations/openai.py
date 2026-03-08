@@ -13,6 +13,7 @@ except ImportError as err:
         "OpenAI not installed. Install with: pip install traqo[openai]"
     ) from err
 
+from traqo.pricing import add_cost
 from traqo.tracer import get_tracer
 
 _CHAT_MODEL_PARAMS = (
@@ -75,6 +76,8 @@ def _extract_response(response: Any) -> tuple[Any, dict[str, int], str]:
                 usage["cache_read_tokens"] = cached
 
     model = response.model or ""
+    if usage and model:
+        add_cost(usage, model)
     return output, usage, model
 
 
@@ -176,6 +179,8 @@ def _aggregate_stream_chunks(chunks: list[Any]) -> tuple[Any, dict[str, int], st
     else:
         output = text
 
+    if usage and model:
+        add_cost(usage, model)
     return output, usage, model
 
 
@@ -366,8 +371,12 @@ class _ResponsesStreamWrapper:
                         cached = getattr(input_details, "cached_tokens", None)
                         if cached:
                             token_usage["cache_read_tokens"] = cached
+                    model = getattr(response, "model", "")
+                    if model:
+                        add_cost(token_usage, model)
                     self._span.set_metadata("token_usage", token_usage)
-                model = getattr(response, "model", "")
+                else:
+                    model = getattr(response, "model", "")
                 if model:
                     self._span.set_metadata("model", model)
                 if self._capture_content:
@@ -453,8 +462,12 @@ class _AsyncResponsesStreamWrapper:
                         cached = getattr(input_details, "cached_tokens", None)
                         if cached:
                             token_usage["cache_read_tokens"] = cached
+                    model = getattr(response, "model", "")
+                    if model:
+                        add_cost(token_usage, model)
                     self._span.set_metadata("token_usage", token_usage)
-                model = getattr(response, "model", "")
+                else:
+                    model = getattr(response, "model", "")
                 if model:
                     self._span.set_metadata("model", model)
                 if self._capture_content:
@@ -651,12 +664,12 @@ class _TracedEmbeddings:
             span.set_metadata("model", model)
             usage = getattr(response, "usage", None)
             if usage:
-                span.set_metadata(
-                    "token_usage",
-                    {
-                        "input_tokens": getattr(usage, "prompt_tokens", 0) or 0,
-                    },
-                )
+                token_usage: dict[str, int] = {
+                    "input_tokens": getattr(usage, "prompt_tokens", 0) or 0,
+                }
+                if model:
+                    add_cost(token_usage, model)
+                span.set_metadata("token_usage", token_usage)
             return response
 
     def __getattr__(self, name: str) -> Any:
@@ -689,12 +702,12 @@ class _TracedAsyncEmbeddings:
             span.set_metadata("model", model)
             usage = getattr(response, "usage", None)
             if usage:
-                span.set_metadata(
-                    "token_usage",
-                    {
-                        "input_tokens": getattr(usage, "prompt_tokens", 0) or 0,
-                    },
-                )
+                token_usage: dict[str, int] = {
+                    "input_tokens": getattr(usage, "prompt_tokens", 0) or 0,
+                }
+                if model:
+                    add_cost(token_usage, model)
+                span.set_metadata("token_usage", token_usage)
             return response
 
     def __getattr__(self, name: str) -> Any:
@@ -771,6 +784,8 @@ class _TracedResponses:
                         cached = getattr(input_details, "cached_tokens", None)
                         if cached:
                             token_usage["cache_read_tokens"] = cached
+                    if model:
+                        add_cost(token_usage, model)
                     span.set_metadata("token_usage", token_usage)
                 if tracer.capture_content:
                     span.set_output(_extract_responses_output(response))
@@ -845,6 +860,8 @@ class _TracedAsyncResponses:
                         cached = getattr(input_details, "cached_tokens", None)
                         if cached:
                             token_usage["cache_read_tokens"] = cached
+                    if model:
+                        add_cost(token_usage, model)
                     span.set_metadata("token_usage", token_usage)
                 if tracer.capture_content:
                     span.set_output(_extract_responses_output(response))
