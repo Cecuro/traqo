@@ -147,10 +147,8 @@ class TestCompletionsCreateTextResponse:
         assert len(span_ends) == 1
         assert span_ends[0]["status"] == "ok"
         assert span_ends[0]["metadata"]["model"] == "gpt-4"
-        assert span_ends[0]["metadata"]["token_usage"] == {
-            "input_tokens": 10,
-            "output_tokens": 5,
-        }
+        assert span_ends[0]["metadata"]["token_usage"]["input_tokens"] == 10
+        assert span_ends[0]["metadata"]["token_usage"]["output_tokens"] == 5
         assert span_ends[0]["output"] == "Hello world"
 
         assert trace_end["stats"]["total_input_tokens"] == 10
@@ -241,10 +239,8 @@ class TestCompletionsCaptureContentFalse:
         assert "output" not in span_end
         # Token usage and model are metadata, not content — still captured
         assert span_end["metadata"]["model"] == "gpt-4"
-        assert span_end["metadata"]["token_usage"] == {
-            "input_tokens": 10,
-            "output_tokens": 5,
-        }
+        assert span_end["metadata"]["token_usage"]["input_tokens"] == 10
+        assert span_end["metadata"]["token_usage"]["output_tokens"] == 5
 
 
 class TestCompletionsStreaming:
@@ -282,10 +278,8 @@ class TestCompletionsStreaming:
         assert span_end["status"] == "ok"
         assert span_end["output"] == "Hello world"
         assert span_end["metadata"]["model"] == "gpt-4"
-        assert span_end["metadata"]["token_usage"] == {
-            "input_tokens": 10,
-            "output_tokens": 5,
-        }
+        assert span_end["metadata"]["token_usage"]["input_tokens"] == 10
+        assert span_end["metadata"]["token_usage"]["output_tokens"] == 5
         assert "time_to_first_token_s" in span_end["metadata"]
         assert isinstance(span_end["metadata"]["time_to_first_token_s"], float)
 
@@ -559,7 +553,5 @@ class TestAsyncCompletions:
         assert span_end["status"] == "ok"
         assert span_end["output"] == "Async hello"
         assert span_end["metadata"]["model"] == "gpt-4"
-        assert span_end["metadata"]["token_usage"] == {
-            "input_tokens": 10,
-            "output_tokens": 5,
-        }
+        assert span_end["metadata"]["token_usage"]["input_tokens"] == 10
+        assert span_end["metadata"]["token_usage"]["output_tokens"] == 5

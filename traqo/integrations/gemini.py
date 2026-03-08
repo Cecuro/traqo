@@ -13,6 +13,7 @@ except ImportError as err:
         "Google GenAI not installed. Install with: pip install traqo[gemini]"
     ) from err
 
+from traqo.pricing import add_cost
 from traqo.tracer import get_tracer
 
 _GEMINI_MODEL_PARAMS = ("temperature", "max_output_tokens", "top_p", "top_k")
@@ -154,6 +155,9 @@ class _StreamWrapper:
             output = text
 
         if usage:
+            model = self._span.metadata.get("model", "")
+            if model:
+                add_cost(usage, model)
             self._span.set_metadata("token_usage", usage)
         if self._capture_content:
             self._span.set_output(output)
@@ -238,6 +242,9 @@ class _AsyncStreamWrapper:
             output = text
 
         if usage:
+            model = self._span.metadata.get("model", "")
+            if model:
+                add_cost(usage, model)
             self._span.set_metadata("token_usage", usage)
         if self._capture_content:
             self._span.set_output(output)
@@ -296,6 +303,8 @@ class _TracedModels:
             )
             usage = _extract_usage(response)
             if usage:
+                if model:
+                    add_cost(usage, model)
                 span.set_metadata("token_usage", usage)
             if tracer.capture_content:
                 span.set_output(_extract_output(response))
@@ -368,6 +377,8 @@ class _TracedModels:
             )
             usage = _extract_usage(response)
             if usage:
+                if model:
+                    add_cost(usage, model)
                 span.set_metadata("token_usage", usage)
             return response
 
@@ -417,6 +428,8 @@ class _TracedAsyncModels:
             )
             usage = _extract_usage(response)
             if usage:
+                if model:
+                    add_cost(usage, model)
                 span.set_metadata("token_usage", usage)
             if tracer.capture_content:
                 span.set_output(_extract_output(response))

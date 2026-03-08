@@ -9,7 +9,7 @@ import sys
 import threading
 import time
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from concurrent.futures import Future
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -33,6 +33,62 @@ CHAIN = "chain"
 AGENT = "agent"
 EMBEDDING = "embedding"
 GUARDRAIL = "guardrail"
+
+# ---------------------------------------------------------------------------
+# Sentinel for "not provided" (distinguishes omitted from explicit default)
+# ---------------------------------------------------------------------------
+
+
+class _UnsetType:
+    """Sentinel to distinguish 'not provided' from an explicit value."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "<UNSET>"
+
+    def __bool__(self) -> bool:
+        return False
+
+
+_UNSET_SENTINEL = _UnsetType()
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning("traqo: invalid %s=%r, using default %s", name, raw, default)
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning("traqo: invalid %s=%r, using default %s", name, raw, default)
+        return default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes")
+
+
+# ---------------------------------------------------------------------------
+# Event size safety net
+# ---------------------------------------------------------------------------
+
+_MAX_EVENT_BYTES = 10_000_000  # 10 MB
+
 
 _active_tracer: ContextVar[Tracer | None] = ContextVar("_active_tracer", default=None)
 _span_stack: ContextVar[tuple[Span, ...]] = ContextVar("_span_stack", default=())
@@ -119,10 +175,12 @@ class Tracer:
         metadata: dict[str, Any] | None = None,
         tags: list[str] | None = None,
         thread_id: str | None = None,
-        capture_content: bool = True,
+        capture_content: bool | _UnsetType = _UNSET_SENTINEL,
         backends: Sequence[Backend] | None = None,
-        flush_interval: float = 2.0,
-        flush_threshold: int = 256_000,
+        flush_interval: float | _UnsetType = _UNSET_SENTINEL,
+        flush_threshold: int | _UnsetType = _UNSET_SENTINEL,
+        mask: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+        release: str | None | _UnsetType = _UNSET_SENTINEL,
     ) -> None:
         """
         Args:
@@ -132,6 +190,11 @@ class Tracer:
                 per-event flushing (old behavior).
             flush_threshold: Approximate buffer size in bytes before forcing a
                 flush, regardless of the interval.
+            mask: Optional callback applied to every event dict before writing.
+                Receives the event dict and must return a (possibly modified)
+                dict. Use this to redact PII or secrets.
+            release: Release identifier written to ``trace_start``. Falls back
+                to ``TRAQO_RELEASE`` env var when not provided.
         """
         import traqo
 
@@ -141,21 +204,42 @@ class Tracer:
         self._metadata = metadata or {}
         self._tags = tags or []
         self._thread_id = thread_id
-        self._capture_content = capture_content
+        # Env var defaults: constructor param > env var > hardcoded default
+        self._capture_content = (
+            capture_content
+            if not isinstance(capture_content, _UnsetType)
+            else _env_bool("TRAQO_CAPTURE_CONTENT", True)
+        )
         self._disabled = traqo._disabled
         self._lock = threading.Lock()
         self._file = None
         self._token = None
         self._start_time: datetime | None = None
         self._output: Any = None
+        self._mask = mask
+        self._release = (
+            release
+            if not isinstance(release, _UnsetType)
+            else os.environ.get("TRAQO_RELEASE") or None
+        )
 
         # Write buffer — accumulate lines and flush on interval or size threshold.
-        if flush_interval < 0:
+        resolved_flush_interval = (
+            flush_interval
+            if not isinstance(flush_interval, _UnsetType)
+            else _env_float("TRAQO_FLUSH_INTERVAL", 2.0)
+        )
+        resolved_flush_threshold = (
+            flush_threshold
+            if not isinstance(flush_threshold, _UnsetType)
+            else _env_int("TRAQO_FLUSH_THRESHOLD", 256_000)
+        )
+        if resolved_flush_interval < 0:
             raise ValueError("flush_interval must be >= 0")
-        if flush_threshold < 0:
+        if resolved_flush_threshold < 0:
             raise ValueError("flush_threshold must be >= 0")
-        self._flush_interval = flush_interval
-        self._flush_threshold = flush_threshold
+        self._flush_interval = resolved_flush_interval
+        self._flush_threshold = resolved_flush_threshold
         self._buffer: list[str] = []
         self._buffer_bytes = 0
         self._last_flush = 0.0  # set properly in _open()
@@ -178,6 +262,7 @@ class Tracer:
         self._stats_cache_read_tokens = 0
         self._stats_cache_creation_tokens = 0
         self._stats_reasoning_tokens = 0
+        self._stats_total_cost = 0.0
         self._children: list[dict[str, Any]] = []
 
         # Child tracer linkage (set by child())
@@ -240,14 +325,16 @@ class Tracer:
         cache_read_tokens: int = 0,
         cache_creation_tokens: int = 0,
         reasoning_tokens: int = 0,
+        cost: float = 0.0,
     ) -> None:
-        """Accumulate token counts. For use by integrations."""
+        """Accumulate token counts and cost. For use by integrations."""
         with self._lock:
             self._stats_input_tokens += input_tokens
             self._stats_output_tokens += output_tokens
             self._stats_cache_read_tokens += cache_read_tokens
             self._stats_cache_creation_tokens += cache_creation_tokens
             self._stats_reasoning_tokens += reasoning_tokens
+            self._stats_total_cost += cost
 
     def _open(self) -> None:
         if self._disabled:
@@ -272,7 +359,29 @@ class Tracer:
         if self._disabled or self._file is None:
             return
         try:
+            # Apply masking callback before serialization
+            if self._mask is not None:
+                event = self._mask(event)
             line = to_json(event)
+            # Event size safety net — strip large fields if over limit
+            if len(line) > _MAX_EVENT_BYTES:
+                original_size = len(line)
+                truncated_fields: list[str] = []
+                for field in ("input", "output", "data", "metadata"):
+                    if field in event:
+                        event[field] = f"<truncated: {field} too large>"
+                        truncated_fields.append(field)
+                        line = to_json(event)
+                        if len(line) <= _MAX_EVENT_BYTES:
+                            break
+                event["_truncated"] = truncated_fields
+                line = to_json(event)
+                logger.warning(
+                    "traqo: event truncated fields %s (%d bytes -> %d bytes)",
+                    truncated_fields,
+                    original_size,
+                    len(line),
+                )
             with self._lock:
                 self._buffer.append(line)
                 self._buffer_bytes += len(line)
@@ -393,6 +502,9 @@ class Tracer:
                     "cache_creation_tokens", 0
                 )
                 self._stats_reasoning_tokens += token_usage.get("reasoning_tokens", 0)
+                cost = token_usage.get("cost")
+                if cost is not None:
+                    self._stats_total_cost += cost
 
     def __enter__(self) -> Tracer:
         self._open()
@@ -403,6 +515,8 @@ class Tracer:
             "ts": self._start_time.isoformat(),
             "tracer_version": __version__,
         }
+        if self._release is not None:
+            start_event["release"] = self._release
         if self._name:
             start_event["name"] = self._name
         if self._input is not None:
@@ -439,6 +553,7 @@ class Tracer:
                 "total_cache_read_tokens": self._stats_cache_read_tokens,
                 "total_cache_creation_tokens": self._stats_cache_creation_tokens,
                 "total_reasoning_tokens": self._stats_reasoning_tokens,
+                "total_cost": round(self._stats_total_cost, 6),
                 "errors": self._stats_errors,
             },
         }
@@ -614,6 +729,8 @@ class Tracer:
                 backends=self._backends,
                 flush_interval=self._flush_interval,
                 flush_threshold=self._flush_threshold,
+                mask=self._mask,
+                release=self._release,
             )
         else:
             child_tracer = Tracer(
@@ -624,6 +741,8 @@ class Tracer:
                 backends=self._backends,
                 flush_interval=self._flush_interval,
                 flush_threshold=self._flush_threshold,
+                mask=self._mask,
+                release=self._release,
             )
         child_tracer._parent = self
         child_tracer._child_name = name
@@ -661,6 +780,7 @@ class Tracer:
             "total_cache_read_tokens": child._stats_cache_read_tokens,
             "total_cache_creation_tokens": child._stats_cache_creation_tokens,
             "total_reasoning_tokens": child._stats_reasoning_tokens,
+            "total_cost": round(child._stats_total_cost, 6),
         }
         self._children.append(summary)
         # Roll up child stats so parent trace_end.stats reflects the full tree
@@ -671,6 +791,7 @@ class Tracer:
             self._stats_cache_read_tokens += child._stats_cache_read_tokens
             self._stats_cache_creation_tokens += child._stats_cache_creation_tokens
             self._stats_reasoning_tokens += child._stats_reasoning_tokens
+            self._stats_total_cost += child._stats_total_cost
             self._stats_errors += child._stats_errors
             self._stats_events += 1
         self._write(
@@ -692,6 +813,7 @@ class Tracer:
                         "total_cache_creation_tokens"
                     ],
                     "total_reasoning_tokens": summary["total_reasoning_tokens"],
+                    "total_cost": summary["total_cost"],
                 },
             }
         )
@@ -702,16 +824,7 @@ class Tracer:
 # ---------------------------------------------------------------------------
 
 
-class _Unset:
-    """Sentinel to distinguish 'not provided' from None."""
-
-    __slots__ = ()
-
-    def __repr__(self) -> str:
-        return "<UNSET>"
-
-
-_UNSET = _Unset()
+_UNSET = _UnsetType()
 
 
 def update_current_span(
@@ -725,7 +838,7 @@ def update_current_span(
     span = get_current_span()
     if span is None:
         return
-    if not isinstance(output, _Unset):
+    if not isinstance(output, _UnsetType):
         span.set_output(output)
     if metadata:
         span.update_metadata(metadata)
